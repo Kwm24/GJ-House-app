@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npx oxlint src/components/cs/ExpenditureTab.jsx src/components/cs/SentTab.jsx src/components/PrintQuoteGH.jsx src/lib/jobs.js src/lib/expenditures.js src/lib/auth.js)",
+      "PowerShell(npm run build)",
+      "PowerShell(npx oxlint src)",
+      "PowerShell(npx oxlint src/components/cs/ExpenditureTab.jsx src/lib/expenditures.js)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "PowerShell(Get-ChildItem -Path \".claude\\\\skills\" -Filter \"SKILL.md\" -Recurse -ErrorAction SilentlyContinue | ForEach-Object { Write-Output $_.FullName; Get-Content $_.FullName | Select-Object -First 5 })",
+      "PowerShell(Get-Command chromium-cli -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command npx -ErrorAction SilentlyContinue)"
+    ]
+  }
+}

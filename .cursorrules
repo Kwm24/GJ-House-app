@@ -1,0 +1,29 @@
+# PrintPress GH — Cursor Rules
+
+## Project
+Multi-role web app for a Ghana print press company.
+React + Vite (JavaScript, not TypeScript), React Router v6, Supabase, Tailwind CSS.
+
+## Stack
+- React functional components only, no class components
+- React Router v6 for all navigation
+- Supabase for auth, database, realtime, and file storage
+- Tailwind CSS for all styling — no inline styles, no CSS modules
+- Mobile-first responsive design on every component
+
+## File structure
+- src/components/ — shared reusable UI
+- src/pages/ — one file per lobby (CS, Production, Designer, Accounts, Customer, Admin)
+- src/lib/ — supabase.js client and helper functions
+- src/layouts/ — wrapper layouts (AuthLayout, DashboardLayout)
+
+## Conventions
+- All Supabase calls go in src/lib/, never directly inside components
+- Use named exports for components
+- Keep each page file focused on one lobby only
+- Always handle loading and error states visibly
+- Quotes and job data shape comes from PrintQuoteGH.jsx — preserve all field names
+
+## Commands
+- npm run dev — dev server at localhost:5173
+- npm run build — production build
