@@ -21,7 +21,8 @@ import { createJob, updateJobStatus, updateJobQuote, markJobSent } from "../lib/
 import { buildMailtoUrl, buildWhatsAppUrl } from "../lib/quoteShare.js";
 import { saveQuoteToStorage } from "../lib/quoteStorage.js";
 import { getSettings } from "../lib/settings.js";
-import { PaperLayoutInfographic } from "./PaperLayoutInfographic.jsx";
+import { fitOnSheet, resolveSheetDims } from "../lib/imposition.js";
+import ImpositionAdvisor from "./ImpositionAdvisor.jsx";
 import { formatGHS as GHS } from "../lib/currency.js";
 import {
   PARENT_SHEETS,
@@ -102,32 +103,28 @@ function getBindingRate(bindType, rates) {
 const SHEETS_PER_REAM = 500;
 const WASTAGE_FACTOR = 1.05;
 
-function calcPaper(bookW, bookH, parentKey, numPages, qty) {
-  const ps = PARENT_SHEETS[parentKey];
+// Resolves a job's chosen parent sheet to {w, h, label}, handling both the
+// built-in catalog keys and the "custom" option set via ImpositionAdvisor,
+// then applies the parent sheet orientation (swaps the SHEET's own w/h).
+function resolveSheet(job) {
+  const base = job.parentSheet === "custom"
+    ? { w: job.customSheetW, h: job.customSheetH, label: `Custom (${job.customSheetW}×${job.customSheetH}")` }
+    : PARENT_SHEETS[job.parentSheet];
+  return resolveSheetDims(base, job.parentSheetOrientation);
+}
+
+function calcPaper(bookW, bookH, ps, numPages, qty, orientation = "portrait") {
   if (!ps || !bookW || !bookH || bookW <= 0 || bookH <= 0) return null;
 
-  const normalCols = Math.floor(ps.w / bookW), normalRows = Math.floor(ps.h / bookH);
-  const rotatedCols = Math.floor(ps.w / bookH), rotatedRows = Math.floor(ps.h / bookW);
-  const fitNormal  = normalCols * normalRows;
-  const fitRotated = rotatedCols * rotatedRows;
-  const rotated = fitRotated > fitNormal;
-  const pagesPerSide  = Math.max(fitNormal, fitRotated, 1);
-  const pagesPerSheet = pagesPerSide * 2;
+  const fit = fitOnSheet(bookW, bookH, ps.w, ps.h, undefined, orientation);
+  if (!fit) return null;
 
-  const sheetsPerCopy = Math.ceil(numPages / pagesPerSheet);
+  const sheetsPerCopy = Math.ceil(numPages / fit.pagesPerSheet);
   const totalSheets   = sheetsPerCopy * qty;
   const withWastage   = Math.ceil(totalSheets * WASTAGE_FACTOR);
   const reamsNeeded   = Math.ceil(withWastage / SHEETS_PER_REAM);
 
-  // Grid layout (cols × rows of the trim size tiled across the parent
-  // sheet), kept here so the form can draw an infographic of it.
-  const cols = rotated ? rotatedCols : normalCols;
-  const rows = rotated ? rotatedRows : normalRows;
-
-  return {
-    pagesPerSide, pagesPerSheet, sheetsPerCopy, totalSheets, withWastage, reamsNeeded,
-    parentW: ps.w, parentH: ps.h, cols: Math.max(cols, 1), rows: Math.max(rows, 1), rotated,
-  };
+  return { ...fit, sheetsPerCopy, totalSheets, withWastage, reamsNeeded };
 }
 
 // Cover stock imposition. Unlike body pages — where each page-position holds
@@ -151,12 +148,12 @@ function calcCoverPaper(pagesPerSide, qty) {
 // ─── QUOTE CALCULATOR ─────────────────────────────────────────────────────────
 function calcQuote(job, rates, qty) {
   const {
-    numPages, colours, bookW, bookH, parentSheet,
+    numPages, colours, bookW, bookH,
     hasCover, coverColours, laminationType,
     bindingType, applyVAT, seposPlates, useManualPlates,
   } = job;
 
-  const paper = calcPaper(bookW, bookH, parentSheet, numPages, qty);
+  const paper = calcPaper(bookW, bookH, resolveSheet(job), numPages, qty, job.printOrientation);
   if (!paper) return null;
 
   // ── 1. Sepos & Plates ──
@@ -268,6 +265,9 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
     numPages: 136, colours: "1",
     bookSize: "A5", bookW: 5.83, bookH: 8.27,
     parentSheet: "standard",
+    printOrientation: "portrait",       // how the book PAGE sits on the sheet
+    parentSheetOrientation: "portrait", // how the parent sheet itself is fed
+    customSheetW: 25, customSheetH: 38, // used only when parentSheet === "custom"
     // Sepos & Plates
     useManualPlates: false,
     seposPlates: "",        // manual plate count
@@ -362,8 +362,10 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
   }, [job, rates, allQtys]);
 
   const paperPreview = useMemo(() =>
-    calcPaper(job.bookW, job.bookH, job.parentSheet, job.numPages, allQtys[0] || 1000),
-    [job.bookW, job.bookH, job.parentSheet, job.numPages, allQtys]
+    calcPaper(job.bookW, job.bookH, resolveSheet(job), job.numPages, allQtys[0] || 1000, job.printOrientation),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [job.bookW, job.bookH, job.parentSheet, job.customSheetW, job.customSheetH,
+     job.parentSheetOrientation, job.printOrientation, job.numPages, allQtys]
   );
 
   // Auto-calc plates for display in form hint
@@ -596,7 +598,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
             <div style={S.div} />
 
             {/* Paper & size */}
-            <div style={S.g3}>
+            <div style={S.g2}>
               <div><label style={S.lbl}>Number of pages</label><input style={S.inp} type="number" min={4} step={4} value={job.numPages} onChange={e => setJ("numPages", Number(e.target.value))} /></div>
               <div><label style={S.lbl}>Colours</label>
                 <select style={S.sel} value={job.colours} onChange={e => setJ("colours", e.target.value)}>
@@ -605,11 +607,31 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                   <option value="4">4 colours (full colour)</option>
                 </select>
               </div>
-              <div><label style={S.lbl}>Parent sheet</label>
-                <select style={S.sel} value={job.parentSheet} onChange={e => setJ("parentSheet", e.target.value)}>
-                  {Object.entries(PARENT_SHEETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-              </div>
+            </div>
+
+            {/* Parent sheet — ranked cheapest-first by the imposition advisor */}
+            <div style={{ marginTop: 12 }}>
+              <ImpositionAdvisor
+                bookW={job.bookW}
+                bookH={job.bookH}
+                numPages={job.numPages}
+                colours={job.colours}
+                bindingType={job.bindingType}
+                qty={allQtys[0] || 1000}
+                rates={rates}
+                value={job.parentSheet}
+                orientation={job.printOrientation}
+                onOrientationChange={(o) => setJ("printOrientation", o)}
+                sheetOrientation={job.parentSheetOrientation}
+                onSheetOrientationChange={(o) => setJ("parentSheetOrientation", o)}
+                onSelect={(key, custom) => {
+                  if (key === "custom" && custom) {
+                    setJob(j => ({ ...j, parentSheet: "custom", customSheetW: custom.w, customSheetH: custom.h }));
+                  } else {
+                    setJ("parentSheet", key);
+                  }
+                }}
+              />
             </div>
 
             <div style={{ ...S.g2, marginTop: 12 }}>
@@ -628,21 +650,12 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                   <div><label style={S.lbl}>Height (inches)</label><input style={S.inp} type="number" step="0.1" value={job.bookH} onChange={e => setJ("bookH", Number(e.target.value))} /></div>
                 </div>
               ) : paperPreview ? (
-                <div style={{ background: "#E8F4FD", border: "1px solid #B8D9F0", borderRadius: 8, padding: "10px 14px", fontSize: 11, color: "#2471A3", display: "flex", gap: 10, alignItems: "center" }}>
-                  <PaperLayoutInfographic
-                    parentW={paperPreview.parentW}
-                    parentH={paperPreview.parentH}
-                    cols={paperPreview.cols}
-                    rows={paperPreview.rows}
-                    rotated={paperPreview.rotated}
-                  />
-                  <div>
-                    <b>📄 Paper layout:</b><br />
-                    {paperPreview.cols} × {paperPreview.rows} = {paperPreview.pagesPerSide} pages/side
-                    {paperPreview.rotated && " (rotated)"}<br />
-                    {paperPreview.pagesPerSheet} pages/sheet · {paperPreview.sheetsPerCopy} sheets/copy<br />
-                    {paperPreview.reamsNeeded} reams per {(allQtys[0] || 1000).toLocaleString()} copies
-                  </div>
+                <div style={{ background: "#E8F4FD", border: "1px solid #B8D9F0", borderRadius: 8, padding: "10px 14px", fontSize: 11, color: "#2471A3" }}>
+                  <b>📄 Paper layout:</b><br />
+                  {paperPreview.pairsAcross} pairs × {paperPreview.rowsDown} rows = {paperPreview.pagesPerSide} pages/side
+                  {paperPreview.rotated && " (rotated)"}<br />
+                  {paperPreview.pagesPerSheet} pages/sheet · {paperPreview.sheetsPerCopy} sheets/copy<br />
+                  {paperPreview.reamsNeeded} reams per {(allQtys[0] || 1000).toLocaleString()} copies
                 </div>
               ) : null}
             </div>
@@ -852,7 +865,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                 {job.numPages} pages ·{" "}
                 {job.colours === "1" ? "1 colour" : job.colours === "4" ? "Full colour" : "2 colours"} ·{" "}
                 {BOOK_SIZES[job.bookSize]?.label || `${job.bookW}"×${job.bookH}"`} ·{" "}
-                {PARENT_SHEETS[job.parentSheet].label} ·{" "}
+                {resolveSheet(job)?.label} ·{" "}
                 {BINDING_TYPES.find(b => b.value === job.bindingType)?.label}
                 {job.hasCover && ` · Cover: ${LAM_TYPES.find(l => l.value === job.laminationType)?.label || "No lam."}`}
               </div>
@@ -882,7 +895,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                         {job.numPages}-page ·{" "}
                         {job.colours === "1" ? "1 colour" : job.colours === "4" ? "Full colour" : `${job.colours} colours`} ·{" "}
                         {BOOK_SIZES[job.bookSize]?.label || `${job.bookW}"×${job.bookH}"`} ·{" "}
-                        {PARENT_SHEETS[job.parentSheet]?.label} ·{" "}
+                        {resolveSheet(job)?.label} ·{" "}
                         {BINDING_TYPES.find(b => b.value === job.bindingType)?.label}
                         {job.hasCover && ` · With separate cover`}
                         {job.hasCover && job.laminationType !== "none" && ` (${LAM_TYPES.find(l => l.value === job.laminationType)?.label} lamination)`}

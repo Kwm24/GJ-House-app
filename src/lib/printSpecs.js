@@ -1,6 +1,9 @@
 export const PARENT_SHEETS = {
-  standard: { w: 30, h: 40, label: 'Standard (30×40")' },
-  nigeria: { w: 24, h: 30, label: 'Nigeria (24×30")' },
+  standard: { w: 30,   h: 40,   label: 'Standard (30×40")' },
+  nigeria:  { w: 24,   h: 30,   label: 'Nigeria (24×30")' },
+  sra1:     { w: 25.2, h: 35.4, label: 'SRA1 (25.2×35.4")' },
+  quarto:   { w: 25,   h: 38,   label: 'Quarto (25×38")' },
+  demy:     { w: 22.5, h: 35,   label: 'Demy (22.5×35")' },
 };
 
 export const BOOK_SIZES = {
