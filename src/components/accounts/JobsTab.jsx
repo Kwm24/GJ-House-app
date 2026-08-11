@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { listAccountsJobs, jobGrandTotal, jobBalanceDue } from "../../lib/jobs.js";
+import { listAccountsJobs, jobGrandTotal, jobTotalPaid, jobOutstanding } from "../../lib/jobs.js";
 import { jobStatusLabel } from "../../lib/jobStatus.js";
 import { formatGHS as GHS } from "../../lib/currency.js";
 import { exportToCsv } from "../../lib/csvExport.js";
@@ -34,8 +34,9 @@ export function JobsTab() {
         Client: job.client_name || "",
         Status: jobStatusLabel(job.status),
         "Grand total (GHS)": jobGrandTotal(job).toFixed(2),
-        "Deposit 60% (GHS)": Number(job.deposit_amount || 0).toFixed(2),
-        "Balance due (GHS)": jobBalanceDue(job).toFixed(2),
+        "Deposit due 60% (GHS)": Number(job.deposit_amount || 0).toFixed(2),
+        "Total paid (GHS)": jobTotalPaid(job).toFixed(2),
+        "Outstanding (GHS)": jobOutstanding(job).toFixed(2),
       }))
     );
   }
@@ -91,12 +92,16 @@ export function JobsTab() {
                   <th className="py-2 pr-4">Client</th>
                   <th className="py-2 pr-4">Status</th>
                   <th className="py-2 pr-4 text-right">Grand total</th>
-                  <th className="py-2 pr-4 text-right">Deposit (60%)</th>
-                  <th className="py-2 pr-4 text-right">Balance due</th>
+                  <th className="py-2 pr-4 text-right">Deposit due (60%)</th>
+                  <th className="py-2 pr-4 text-right">Total paid</th>
+                  <th className="py-2 pr-4 text-right">Outstanding</th>
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((job) => (
+                {jobs.map((job) => {
+                  const totalPaid = jobTotalPaid(job);
+                  const outstanding = jobOutstanding(job);
+                  return (
                   <tr key={job.id} className="border-b border-gray-200">
                     <td className="py-2.5 pr-4 text-brand-dark">
                       <div className="font-medium">{job.job_title || "Untitled job"}</div>
@@ -114,11 +119,19 @@ export function JobsTab() {
                     <td className="py-2.5 pr-4 text-right text-gray-600 whitespace-nowrap">
                       {GHS(job.deposit_amount)}
                     </td>
-                    <td className="py-2.5 pr-4 text-right font-medium text-brand-red whitespace-nowrap">
-                      {GHS(jobBalanceDue(job))}
+                    <td className="py-2.5 pr-4 text-right whitespace-nowrap">
+                      <span className={totalPaid > 0 ? "font-medium text-green-700" : "text-gray-400"}>
+                        {GHS(totalPaid)}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-4 text-right font-medium whitespace-nowrap">
+                      <span className={outstanding <= 0 ? "text-green-700" : "text-brand-red"}>
+                        {outstanding <= 0 ? "✓ Settled" : GHS(outstanding)}
+                      </span>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

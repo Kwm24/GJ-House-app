@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../AuthProvider.jsx";
 import { listPayments, createPayment, deletePayment, PAYMENT_METHODS, PAYMENT_TYPES } from "../../lib/payments.js";
-import { listJobsForPicker } from "../../lib/jobs.js";
+import { listJobsForPicker, jobGrandTotal } from "../../lib/jobs.js";
 import { subscribeToTable } from "../../lib/realtime.js";
 import { getSettings } from "../../lib/settings.js";
 import { formatGHS as GHS } from "../../lib/currency.js";
@@ -110,6 +110,7 @@ export function PaymentsTab() {
   const [jobId, setJobId] = useState("");
   const [amount, setAmount] = useState("");
   const [type, setType] = useState("deposit");
+  const selectedJob = jobOptions.find((j) => j.id === jobId) ?? null;
   const [method, setMethod] = useState(PAYMENT_METHODS[0]);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
@@ -260,6 +261,36 @@ export function PaymentsTab() {
                   </option>
                 ))}
               </select>
+              {selectedJob && (
+                <div className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+                  <span>
+                    Grand total:{" "}
+                    <span className="font-semibold text-gray-800">
+                      GH₵ {jobGrandTotal(selectedJob).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </span>
+                  <span>
+                    60% deposit:{" "}
+                    <button
+                      type="button"
+                      className="font-semibold text-brand-red underline decoration-dotted"
+                      onClick={() => { setType("deposit"); setAmount(Number(selectedJob.deposit_amount).toFixed(2)); }}
+                    >
+                      GH₵ {Number(selectedJob.deposit_amount).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ↑ use
+                    </button>
+                  </span>
+                  <span>
+                    Balance (40%):{" "}
+                    <button
+                      type="button"
+                      className="font-semibold text-brand-red underline decoration-dotted"
+                      onClick={() => { setType("balance"); setAmount((jobGrandTotal(selectedJob) * 0.4).toFixed(2)); }}
+                    >
+                      GH₵ {(jobGrandTotal(selectedJob) * 0.4).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ↑ use
+                    </button>
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

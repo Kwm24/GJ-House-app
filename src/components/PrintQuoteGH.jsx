@@ -70,6 +70,16 @@ const PRINT_CSS = `
 const PRESET_QTYS = [500, 1000, 2000, 3000, 4000, 5000];
 const VAT_RATE = 0.20;
 
+// Press plate sizes. "full_sheet" means the plate covers the whole parent sheet
+// (current legacy behaviour). Named presses use a specific plate dimension, so
+// imposition fits pages onto the plate, not the sheet, and the number of plate
+// areas that tile onto one sheet side is calculated separately.
+const PLATE_SIZES = [
+  { value: "full_sheet", label: "Full sheet (plate = parent sheet)" },
+  { value: "kord64",     label: 'Heidelberg KORD 64 (18.1×25.2")', w: 18.1, h: 25.2 },
+  { value: "custom",     label: "Custom plate size" },
+];
+
 // Company info — edit these
 const DEFAULT_COMPANY = {
   name:    "YOUR PRESS NAME",
@@ -101,6 +111,7 @@ function getBindingRate(bindType, rates) {
 
 // ─── PAPER CALCULATOR ────────────────────────────────────────────────────────
 const SHEETS_PER_REAM = 500;
+const COVER_SHEETS_PER_REAM = 100; // Cover stock comes in 100-sheet reams
 const WASTAGE_FACTOR = 1.05;
 
 // Resolves a job's chosen parent sheet to {w, h, label}, handling both the
@@ -113,18 +124,45 @@ function resolveSheet(job) {
   return resolveSheetDims(base, job.parentSheetOrientation);
 }
 
-function calcPaper(bookW, bookH, ps, numPages, qty, orientation = "portrait") {
+// Returns a plate object {w, h} when a named press plate is selected,
+// or null when "full_sheet" is chosen (plate = parent sheet).
+function resolvePlate(job) {
+  if (!job.plateSize || job.plateSize === "full_sheet") return null;
+  if (job.plateSize === "custom") {
+    const w = Number(job.customPlateW), h = Number(job.customPlateH);
+    return (w > 0 && h > 0) ? { w, h } : null;
+  }
+  const found = PLATE_SIZES.find(p => p.value === job.plateSize);
+  return found?.w ? { w: found.w, h: found.h } : null;
+}
+
+function calcPaper(bookW, bookH, ps, numPages, qty, orientation = "portrait", plate = null) {
   if (!ps || !bookW || !bookH || bookW <= 0 || bookH <= 0) return null;
 
-  const fit = fitOnSheet(bookW, bookH, ps.w, ps.h, undefined, orientation);
+  // Pages are fitted onto the plate area (or the full sheet when no plate is set).
+  const fitArea = plate || ps;
+  const fit = fitOnSheet(bookW, bookH, fitArea.w, fitArea.h, undefined, orientation);
   if (!fit) return null;
 
-  const sheetsPerCopy = Math.ceil(numPages / fit.pagesPerSheet);
+  // How many plate areas tile onto one parent sheet side?
+  // Try both plate orientations (portrait + landscape) and use whichever packs more.
+  // When no plate is set this is always 1 (one plate = one sheet).
+  const platesPerSheetSide = plate ? Math.max(
+    1,
+    Math.floor(ps.w / fitArea.w) * Math.floor(ps.h / fitArea.h),   // plate portrait
+    Math.floor(ps.w / fitArea.h) * Math.floor(ps.h / fitArea.w),   // plate landscape
+  ) : 1;
+
+  // fit.pagesPerSheet = pages per PLATE (front + back) — used for forme/plate count.
+  // pagesPerSheetEffective = pages per full PARENT SHEET — used for paper/ream cost.
+  const pagesPerSheetEffective = fit.pagesPerSide * platesPerSheetSide * 2;
+
+  const sheetsPerCopy = Math.ceil(numPages / pagesPerSheetEffective);
   const totalSheets   = sheetsPerCopy * qty;
   const withWastage   = Math.ceil(totalSheets * WASTAGE_FACTOR);
   const reamsNeeded   = Math.ceil(withWastage / SHEETS_PER_REAM);
 
-  return { ...fit, sheetsPerCopy, totalSheets, withWastage, reamsNeeded };
+  return { ...fit, platesPerSheetSide, pagesPerSheetEffective, sheetsPerCopy, totalSheets, withWastage, reamsNeeded };
 }
 
 // Cover stock imposition. Unlike body pages — where each page-position holds
@@ -140,7 +178,7 @@ function calcCoverPaper(pagesPerSide, qty) {
   const totalPanels   = panelsPerCopy * qty;
   const totalSheets   = Math.ceil(totalPanels / panelsPerSheet);
   const withWastage   = Math.ceil(totalSheets * WASTAGE_FACTOR);
-  const reamsNeeded   = Math.ceil(withWastage / SHEETS_PER_REAM);
+  const reamsNeeded   = Math.ceil(withWastage / COVER_SHEETS_PER_REAM);
 
   return { panelsPerSheet, totalPanels, totalSheets, withWastage, reamsNeeded };
 }
@@ -153,12 +191,23 @@ function calcQuote(job, rates, qty) {
     bindingType, applyVAT, seposPlates, useManualPlates,
   } = job;
 
-  const paper = calcPaper(bookW, bookH, resolveSheet(job), numPages, qty, job.printOrientation);
+  // Overs: extra copies added to the press run to absorb spoilage / errors.
+  // All per-copy running costs (paper, fold, binding, cover paper/lam) use
+  // printRun so that those extra sheets are costed. Plates and impression
+  // counts don't change — the same formes print regardless of overs.
+  // Unit price is always grandTotal ÷ orderedQty so the client sees the real
+  // cost per delivered copy, with overs already absorbed.
+  const orderedQty = qty;
+  const overs      = Math.max(0, parseInt(job.overs) || 0);
+  const printRun   = orderedQty + overs;
+
+  const paper = calcPaper(bookW, bookH, resolveSheet(job), numPages, printRun, job.printOrientation, resolvePlate(job));
   if (!paper) return null;
 
   // ── 1. Sepos & Plates ──
   // Each form has a front and back side. Each side needs one plate PER COLOUR.
-  // So: forms × 2 sides × colours = total plates
+  // So: forms × 2 sides × colours = total plates.
+  // Plate count is per-forme — independent of overs (same plates print the full run).
   let numPlates;
   if (useManualPlates) {
     numPlates = Math.max(1, parseInt(seposPlates) || 0);
@@ -171,45 +220,50 @@ function calcQuote(job, rates, qty) {
   // ── 2. Paper ──
   const paperCost = paper.reamsNeeded * rates.paperRate;
 
-  // ── 3. Impressions ──
-  // numPlates already accounts for colours (forms × 2 sides × colours)
-  // Each plate runs once through the machine = 1 impression
-  // So impressions = numPlates (no need to multiply by colours again)
+  // ── 3. Impressions (body) ──
+  // numPlates already accounts for colours (forms × 2 sides × colours).
+  // Each plate runs once through the machine = 1 impression.
+  // Impression count is per-forme — also independent of overs.
   const impressions    = numPlates;
   const impressionCost = impressions * rates.impressionRate;
 
   // ── 4. Fold & Collate ──
-  const foldCost = qty * rates.foldCollateRate;
+  const foldCost = printRun * rates.foldCollateRate;
 
   // ── 5. Binding ──
-  const bindingCost = qty * getBindingRate(bindingType, rates);
+  const bindingCost = printRun * getBindingRate(bindingType, rates);
 
   // ── 6. Cover ──
-  let coverPlateCost = 0, coverPaperCost = 0, coverLamCost = 0, coverPaper = null;
+  let coverPlateCost = 0, coverPaperCost = 0, coverLamCost = 0,
+      coverPaper = null, coverImpressionCost = 0;
   if (hasCover) {
-    const covPlates  = Number(coverColours);
-    coverPlateCost   = covPlates * rates.coverPlateRate;
-    coverPaper       = calcCoverPaper(paper.pagesPerSide, qty);
-    coverPaperCost   = coverPaper.reamsNeeded * rates.coverPaperRate;
-    const lamRate    = getLamRate(laminationType, rates);
-    coverLamCost     = qty * lamRate;
+    const covPlates       = Number(coverColours);
+    coverPlateCost        = covPlates * rates.coverPlateRate;
+    // Cover impressions: one press run per colour on the cover forme.
+    coverImpressionCost   = covPlates * rates.impressionRate;
+    coverPaper            = calcCoverPaper(paper.pagesPerSide * paper.platesPerSheetSide, printRun);
+    coverPaperCost        = coverPaper.reamsNeeded * rates.coverPaperRate;
+    const lamRate         = getLamRate(laminationType, rates);
+    coverLamCost          = printRun * lamRate;
   }
 
   const subtotal  = plateCost + paperCost + impressionCost + foldCost + bindingCost
-                  + coverPlateCost + coverPaperCost + coverLamCost;
+                  + coverPlateCost + coverPaperCost + coverLamCost + coverImpressionCost;
   const margin    = subtotal * (rates.profitMargin / 100);
   const beforeVAT = subtotal + margin;
   const vatAmt    = applyVAT ? beforeVAT * VAT_RATE : 0;
   const grandTotal = beforeVAT + vatAmt;
-  const unitPrice  = grandTotal / qty;
+  // Unit price = total for full print run ÷ ordered qty (overs cost is absorbed).
+  const unitPrice  = grandTotal / orderedQty;
 
   return {
     numPlates, plateCost,
     paper, paperCost,
     impressions, impressionCost,
     foldCost, bindingCost,
-    coverPlateCost, coverPaperCost, coverLamCost, coverPaper,
+    coverPlateCost, coverPaperCost, coverLamCost, coverPaper, coverImpressionCost,
     subtotal, margin, beforeVAT, vatAmt, grandTotal, unitPrice,
+    overs, printRun, orderedQty,
   };
 }
 
@@ -221,7 +275,7 @@ function CostBar({ r, qty }) {
     { label: "Paper",       val: r.paperCost,                              color: "#E67E22" },
     { label: "Impressions", val: r.impressionCost,                         color: "#2980B9" },
     { label: "Post-press",  val: r.foldCost + r.bindingCost,               color: "#27AE60" },
-    { label: "Cover",       val: r.coverPlateCost + r.coverPaperCost + r.coverLamCost, color: "#8E44AD" },
+    { label: "Cover",       val: r.coverPlateCost + r.coverPaperCost + r.coverLamCost + (r.coverImpressionCost || 0), color: "#8E44AD" },
     { label: "Margin",      val: r.margin,                                 color: "#7F8C8D" },
     { label: "VAT",         val: r.vatAmt,                                 color: "#BDC3C7" },
   ].filter(i => i.val > 0);
@@ -268,6 +322,9 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
     printOrientation: "portrait",       // how the book PAGE sits on the sheet
     parentSheetOrientation: "portrait", // how the parent sheet itself is fed
     customSheetW: 25, customSheetH: 38, // used only when parentSheet === "custom"
+    // Press plate size
+    plateSize: "full_sheet",            // "full_sheet" | "kord64" | "custom"
+    customPlateW: 18.1, customPlateH: 25.2,
     // Sepos & Plates
     useManualPlates: false,
     seposPlates: "",        // manual plate count
@@ -278,6 +335,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
     // Quantities
     selectedQtys: [1000, 2000],
     customQty: "",           // custom quantity input
+    overs: 0,               // extra copies added to press run to absorb spoilage
     // VAT
     applyVAT: false,
     // Workflow — does this job need design work before it goes to production?
@@ -362,10 +420,11 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
   }, [job, rates, allQtys]);
 
   const paperPreview = useMemo(() =>
-    calcPaper(job.bookW, job.bookH, resolveSheet(job), job.numPages, allQtys[0] || 1000, job.printOrientation),
+    calcPaper(job.bookW, job.bookH, resolveSheet(job), job.numPages, allQtys[0] || 1000, job.printOrientation, resolvePlate(job)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [job.bookW, job.bookH, job.parentSheet, job.customSheetW, job.customSheetH,
-     job.parentSheetOrientation, job.printOrientation, job.numPages, allQtys]
+     job.parentSheetOrientation, job.printOrientation, job.numPages,
+     job.plateSize, job.customPlateW, job.customPlateH, allQtys]
   );
 
   // Auto-calc plates for display in form hint
@@ -652,10 +711,12 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
               ) : paperPreview ? (
                 <div style={{ background: "#E8F4FD", border: "1px solid #B8D9F0", borderRadius: 8, padding: "10px 14px", fontSize: 11, color: "#2471A3" }}>
                   <b>📄 Paper layout:</b><br />
-                  {paperPreview.pairsAcross} pairs × {paperPreview.rowsDown} rows = {paperPreview.pagesPerSide} pages/side
+                  {paperPreview.pairsAcross} pairs × {paperPreview.rowsDown} rows = {paperPreview.pagesPerSide} pages/{resolvePlate(job) ? "plate side" : "sheet side"}
                   {paperPreview.rotated && " (rotated)"}<br />
-                  {paperPreview.pagesPerSheet} pages/sheet · {paperPreview.sheetsPerCopy} sheets/copy<br />
-                  {paperPreview.reamsNeeded} reams per {(allQtys[0] || 1000).toLocaleString()} copies
+                  {resolvePlate(job) && paperPreview.platesPerSheetSide > 1 && (
+                    <>{paperPreview.platesPerSheetSide} plates/sheet side → {paperPreview.pagesPerSheetEffective} pages/sheet · </>
+                  )}
+                  {paperPreview.sheetsPerCopy} sheets/copy · {paperPreview.reamsNeeded} reams per {(allQtys[0] || 1000).toLocaleString()} copies
                 </div>
               ) : null}
             </div>
@@ -664,6 +725,54 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
           {/* ── 02 Sepos & Plates ── */}
           <div style={S.card}>
             <div style={S.cTitle}>02 — Sepos &amp; plates</div>
+
+            {/* Press plate size */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={S.lbl}>Press plate size</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                {PLATE_SIZES.map(ps => (
+                  <button
+                    key={ps.value}
+                    type="button"
+                    style={S.chip(job.plateSize === ps.value || (!job.plateSize && ps.value === "full_sheet"))}
+                    onClick={() => setJ("plateSize", ps.value)}
+                  >
+                    {ps.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Custom plate dimensions */}
+              {job.plateSize === "custom" && (
+                <div style={{ ...S.g2, marginTop: 10, maxWidth: 340 }}>
+                  <div>
+                    <label style={S.lbl}>Plate width (inches)</label>
+                    <input style={S.inp} type="number" step="0.1" value={job.customPlateW}
+                      onChange={e => setJ("customPlateW", Number(e.target.value))} />
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Plate height (inches)</label>
+                    <input style={S.inp} type="number" step="0.1" value={job.customPlateH}
+                      onChange={e => setJ("customPlateH", Number(e.target.value))} />
+                  </div>
+                </div>
+              )}
+
+              {/* Live plate-per-sheet feedback */}
+              {resolvePlate(job) && paperPreview && (
+                <div style={{ marginTop: 8, background: "#E8F4FD", border: "1px solid #B8D9F0", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#2471A3" }}>
+                  {paperPreview.pagesPerSide} pages/plate side · {paperPreview.platesPerSheetSide} plate{paperPreview.platesPerSheetSide !== 1 ? "s" : ""}/sheet side
+                  {paperPreview.platesPerSheetSide > 1
+                    ? ` → ${paperPreview.pagesPerSheetEffective} pages/sheet (${paperPreview.platesPerSheetSide}-up printing)`
+                    : ` → ${paperPreview.pagesPerSheetEffective} pages/sheet`
+                  }
+                </div>
+              )}
+            </div>
+
+            <div style={S.div} />
+
+            {/* Manual plate override */}
             <div style={S.togRow}>
               <div style={S.tog(job.useManualPlates)} onClick={() => setJ("useManualPlates", !job.useManualPlates)}>
                 <div style={S.togDot(job.useManualPlates)} />
@@ -684,7 +793,8 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                 Auto-calculated: <b style={{ color: "#1C1C1E" }}>{autoPlates ?? "—"} plates</b>
                 {autoPlates && paperPreview && (() => {
                   const forms = Math.ceil(job.numPages / paperPreview.pagesPerSheet);
-                  return ` (${forms} forms × 2 sides × ${job.colours} colour${job.colours > 1 ? "s" : ""})`;
+                  const isPlateMode = !!resolvePlate(job);
+                  return ` (${forms} ${isPlateMode ? "plate formes" : "forms"} × 2 sides × ${job.colours} colour${Number(job.colours) > 1 ? "s" : ""})`;
                 })()}
               </p>
             )}
@@ -774,6 +884,25 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                   ✓ {parseInt(job.customQty).toLocaleString()} copies added
                 </div>
               )}
+            </div>
+
+            {/* Overs / spoilage */}
+            <div style={{ marginTop: 14 }}>
+              <label style={S.lbl}>Overs / spoilage quantity</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <input style={{ ...S.inp, maxWidth: 200 }} type="number" min={0} step={50}
+                  value={job.overs}
+                  onChange={e => setJ("overs", e.target.value)}
+                  placeholder="e.g. 200" />
+                {parseInt(job.overs) > 0 && (
+                  <div style={{ fontSize: 12, color: "#888", lineHeight: "1.5" }}>
+                    Press run = ordered + {parseInt(job.overs).toLocaleString()} overs
+                    <br />
+                    Unit price = total ÷ ordered qty
+                  </div>
+                )}
+              </div>
+              <p style={S.hint}>Extra copies to absorb spoilage — all running costs are calculated for the full print run, but the unit price is divided by the ordered quantity only.</p>
             </div>
 
             <div style={{ ...S.div, marginTop: 16 }} />
@@ -944,6 +1073,13 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                     </tr>
                     <tr className="spec-row">
                       <td style={S.tdF}>
+                        Cover — Impressions
+                        <span style={S.pill("#2980B9")}>{job.coverColours} clrs</span>
+                      </td>
+                      {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.coverImpressionCost)}</td>)}
+                    </tr>
+                    <tr className="spec-row">
+                      <td style={S.tdF}>
                         Cover — Paper
                         {resultQtys.map(q => (
                           <span key={q} style={{ ...S.pill("#8E44AD"), marginRight: 3 }}>
@@ -1014,11 +1150,35 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                   {/* Unit Price */}
                   <tr className="grand-row">
                     <td style={{ ...S.tdF, fontWeight: 800, fontSize: 13, color: "#C0392B" }}>
-                      UNIT PRICE <span style={{ fontSize: 10, fontWeight: 400, color: "#999" }}>per copy</span>
+                      UNIT PRICE{" "}
+                      <span style={{ fontSize: 10, fontWeight: 400, color: "#999" }}>
+                        per copy{parseInt(job.overs) > 0 ? ` · incl. ${parseInt(job.overs).toLocaleString()} overs in run` : ""}
+                      </span>
                     </td>
                     {resultQtys.map(q => (
                       <td key={q} style={{ ...S.td, ...S.tdGrand, fontSize: 16 }}>
                         {GHS(results[q]?.unitPrice)}
+                      </td>
+                    ))}
+                  </tr>
+
+                  {/* Deposit & balance — shown in both screen and print */}
+                  <tr style={{ borderTop: "2px solid #E0D9CF" }}>
+                    <td style={{ ...S.tdF, fontWeight: 700, color: "#1C1C1E", paddingTop: 10 }}>
+                      Deposit required (60%)
+                      <span style={{ fontSize: 9, fontWeight: 400, color: "#AAA", marginLeft: 6 }}>payable before production begins</span>
+                    </td>
+                    {resultQtys.map(q => (
+                      <td key={q} style={{ ...S.td, fontWeight: 700, color: "#1C1C1E", paddingTop: 10 }}>
+                        {GHS((results[q]?.grandTotal ?? 0) * 0.6)}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td style={{ ...S.tdF, color: "#666" }}>Balance on delivery</td>
+                    {resultQtys.map(q => (
+                      <td key={q} style={{ ...S.td, color: "#666" }}>
+                        {GHS((results[q]?.grandTotal ?? 0) * 0.4)}
                       </td>
                     ))}
                   </tr>

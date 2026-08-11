@@ -43,10 +43,11 @@ export async function createJob(userId, quoteSnapshot, status) {
 
 // Every paid job (anything past "sent") — what the Accounts lobby's Jobs
 // tab lists, since unpaid quotes have no deposit/balance to track yet.
+// Includes the payments sub-array so actual cash received can be summed.
 export async function listAccountsJobs() {
   const { data, error } = await supabase
     .from("jobs")
-    .select("*")
+    .select("*, payments(id, amount, type, method, date)")
     .neq("status", "sent")
     .order("created_at", { ascending: false });
 
@@ -54,12 +55,25 @@ export async function listAccountsJobs() {
   return data;
 }
 
+// Sum of all payment records linked to a job.
+export function jobTotalPaid(job) {
+  return Math.round(
+    (job.payments ?? []).reduce((sum, p) => sum + Number(p.amount || 0), 0) * 100
+  ) / 100;
+}
+
+// Outstanding amount = grand total minus everything actually received so far.
+export function jobOutstanding(job) {
+  return Math.round((jobGrandTotal(job) - jobTotalPaid(job)) * 100) / 100;
+}
+
 // Lightweight job list for picker dropdowns (e.g. tagging an expenditure
-// or payment to the job it belongs to).
+// or payment to the job it belongs to). Includes deposit_amount and quote
+// so the payments form can suggest the correct deposit figure.
 export async function listJobsForPicker() {
   const { data, error } = await supabase
     .from("jobs")
-    .select("id, job_title, quote_ref, client_name")
+    .select("id, job_title, quote_ref, client_name, deposit_amount, quote")
     .order("created_at", { ascending: false });
 
   if (error) throw error;

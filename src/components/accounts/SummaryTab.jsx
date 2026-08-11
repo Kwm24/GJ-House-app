@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
-import { listAccountsJobs, jobGrandTotal } from "../../lib/jobs.js";
+import { listAccountsJobs, jobGrandTotal, jobTotalPaid } from "../../lib/jobs.js";
 import { listAllExpenditures } from "../../lib/expenditures.js";
+import { listPayments } from "../../lib/payments.js";
 import { formatGHS as GHS } from "../../lib/currency.js";
 import { exportToCsv } from "../../lib/csvExport.js";
 
 export function SummaryTab() {
   const [jobs, setJobs] = useState([]);
   const [expenditures, setExpenditures] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -14,12 +16,14 @@ export function SummaryTab() {
     setLoading(true);
     setError("");
     try {
-      const [jobsData, expData] = await Promise.all([
+      const [jobsData, expData, paymentsData] = await Promise.all([
         listAccountsJobs(),
         listAllExpenditures(),
+        listPayments(),
       ]);
       setJobs(jobsData);
       setExpenditures(expData);
+      setPayments(paymentsData);
     } catch (err) {
       setError(err.message ?? "Could not load summary.");
     } finally {
@@ -31,9 +35,11 @@ export function SummaryTab() {
     load();
   }, [load]);
 
-  const totalRevenue = jobs.reduce((sum, j) => sum + jobGrandTotal(j), 0);
-  const totalExpenditure = expenditures.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-  const netMargin = totalRevenue - totalExpenditure;
+  const totalRevenue      = jobs.reduce((sum, j) => sum + jobGrandTotal(j), 0);
+  const totalCashReceived = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const totalOutstanding  = jobs.reduce((sum, j) => sum + Math.max(0, jobGrandTotal(j) - jobTotalPaid(j)), 0);
+  const totalExpenditure  = expenditures.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  const netMargin         = totalRevenue - totalExpenditure;
 
   function handleExport() {
     exportToCsv(`accounts-summary-${new Date().toISOString().slice(0, 10)}.csv`, [
@@ -82,13 +88,29 @@ export function SummaryTab() {
             />
           </div>
         ) : (
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="rounded-lg bg-white border border-gray-200 p-5">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Total revenue
+                Quoted revenue
               </p>
               <p className="mt-2 text-2xl font-bold text-brand-dark">{GHS(totalRevenue)}</p>
               <p className="mt-1 text-xs text-gray-400">Sum of approved quote totals</p>
+            </div>
+
+            <div className="rounded-lg bg-white border border-green-200 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Cash received
+              </p>
+              <p className="mt-2 text-2xl font-bold text-green-700">{GHS(totalCashReceived)}</p>
+              <p className="mt-1 text-xs text-gray-400">Sum of all recorded payments</p>
+            </div>
+
+            <div className="rounded-lg bg-white border border-orange-200 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Outstanding
+              </p>
+              <p className="mt-2 text-2xl font-bold text-orange-600">{GHS(totalOutstanding)}</p>
+              <p className="mt-1 text-xs text-gray-400">Unpaid balance across all jobs</p>
             </div>
 
             <div className="rounded-lg bg-white border border-gray-200 p-5">
@@ -99,14 +121,14 @@ export function SummaryTab() {
               <p className="mt-1 text-xs text-gray-400">Sum of all recorded expenses</p>
             </div>
 
-            <div className="rounded-lg bg-brand-dark text-brand-cream p-5">
+            <div className="rounded-lg bg-brand-dark text-brand-cream p-5 sm:col-span-2 lg:col-span-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-cream/60">
                 Net margin
               </p>
               <p className={`mt-2 text-2xl font-bold ${netMargin < 0 ? "text-red-400" : "text-brand-cream"}`}>
-                {netMargin < 0 ? "-" : ""}{GHS(netMargin)}
+                {netMargin < 0 ? "-" : ""}{GHS(Math.abs(netMargin))}
               </p>
-              <p className="mt-1 text-xs text-brand-cream/50">Revenue minus expenditure</p>
+              <p className="mt-1 text-xs text-brand-cream/50">Quoted revenue minus expenditure</p>
             </div>
           </div>
         )}
