@@ -11,6 +11,7 @@ import InvoiceBuilder from "./InvoiceBuilder.jsx";
 const DEFAULT_COMPANY = {
   name: "YOUR PRESS NAME", address: "Street Address, Accra, Ghana",
   phone: "+233 XX XXX XXXX", email: "email@yourpress.com", vatNo: "",
+  logoUrl: "", accentHex: "#C0392B",
 };
 
 const TYPE_LABELS = Object.fromEntries(INVOICE_TYPES.map((t) => [t.value, t.label]));
@@ -39,12 +40,14 @@ export function InvoicesTab() {
     loadInvoices();
     listItems().then(setItems).catch(() => {});
     getSettings().then((d) => {
-      if (d?.company_name) setCompany({
-        name:    d.company_name    ?? DEFAULT_COMPANY.name,
-        address: d.company_address ?? DEFAULT_COMPANY.address,
-        phone:   d.company_phone   ?? DEFAULT_COMPANY.phone,
-        email:   d.company_email   ?? DEFAULT_COMPANY.email,
-        vatNo:   d.company_vat_no  ?? "",
+      if (d) setCompany({
+        name:      d.company_name    ?? DEFAULT_COMPANY.name,
+        address:   d.company_address ?? DEFAULT_COMPANY.address,
+        phone:     d.company_phone   ?? DEFAULT_COMPANY.phone,
+        email:     d.company_email   ?? DEFAULT_COMPANY.email,
+        vatNo:     d.company_vat_no  ?? "",
+        logoUrl:   d.company_logo_url ?? "",
+        accentHex: d.accent_color    ?? "#C0392B",
       });
     }).catch(() => {});
   }, [loadInvoices]);

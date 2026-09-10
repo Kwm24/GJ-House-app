@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Accent colour custom property ─────────────────────────────────────────
+   Space-separated RGB so Tailwind opacity modifiers work: bg-brand-red/40
+   --c-accent  → used by Tailwind (rgb(var(--c-accent) / <alpha-value>))
+   --br        → used by inline styles and print CSS: var(--br, #C0392B)
+   Both are overridden at runtime by AccentColorInjector from admin settings.
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  --c-accent: 192 57 43;   /* #C0392B */
+  --br: #C0392B;
+}
+
 @layer base {
   body {
     @apply m-0 min-h-screen antialiased;

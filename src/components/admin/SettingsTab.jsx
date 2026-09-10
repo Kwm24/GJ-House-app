@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getSettings, updateSettings, uploadCompanyLogo } from "../../lib/settings.js";
 import { DEFAULT_RATES, RATE_GROUPS } from "../../lib/printSpecs.js";
+import { applyAccentHex } from "../AccentColorInjector.jsx";
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-red/40 focus:border-brand-red";
@@ -34,6 +35,10 @@ export function SettingsTab() {
   const [savingRates, setSavingRates] = useState(false);
   const [ratesMsg, setRatesMsg] = useState("");
 
+  const [accentColor, setAccentColor] = useState("#C0392B");
+  const [savingBranding, setSavingBranding] = useState(false);
+  const [brandingMsg, setBrandingMsg] = useState("");
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -52,6 +57,7 @@ export function SettingsTab() {
         setAccountNumber(data.account_number || "");
         setAccountName(data.account_name || "");
         setRates({ ...DEFAULT_RATES, ...(data.quote_rates || {}) });
+        setAccentColor(data.accent_color || "#C0392B");
       }
     } catch (err) {
       setError(err.message ?? "Could not load settings.");
@@ -119,6 +125,21 @@ export function SettingsTab() {
       setPaymentMsg(err.message ?? "Could not save payment details.");
     } finally {
       setSavingPayment(false);
+    }
+  }
+
+  async function handleSaveBranding() {
+    setSavingBranding(true);
+    setBrandingMsg("");
+    try {
+      await updateSettings({ accent_color: accentColor });
+      // Apply immediately so the change is visible without a page refresh
+      applyAccentHex(accentColor);
+      setBrandingMsg("Branding saved.");
+    } catch (err) {
+      setBrandingMsg(err.message ?? "Could not save branding.");
+    } finally {
+      setSavingBranding(false);
     }
   }
 
@@ -301,6 +322,83 @@ export function SettingsTab() {
         >
           {savingPayment ? "Saving…" : "Save payment details"}
         </button>
+      </div>
+
+      {/* ── Branding ── */}
+      <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
+        <h2 className="text-lg sm:text-xl font-semibold text-brand-dark">Branding</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          Accent colour used throughout the interface and on printed documents.
+          Changes apply immediately without a page refresh.
+        </p>
+
+        {brandingMsg && (
+          <div role="status" className={`mt-4 rounded-lg border px-4 py-3 text-sm ${brandingMsg.includes("saved") ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-800"}`}>
+            {brandingMsg}
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap items-end gap-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Accent colour</label>
+            <div className="flex items-center gap-3">
+              {/* Colour swatch picker */}
+              <input
+                type="color"
+                value={accentColor}
+                onChange={(e) => setAccentColor(e.target.value)}
+                className="h-10 w-14 rounded-lg cursor-pointer border border-gray-300 p-0.5 bg-white"
+                title="Pick accent colour"
+              />
+              {/* Hex text field */}
+              <input
+                type="text"
+                value={accentColor}
+                onChange={(e) => setAccentColor(e.target.value)}
+                className={inputClass}
+                style={{ width: 120 }}
+                placeholder="#C0392B"
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-gray-400">
+              Enter any hex code — e.g. #C0392B (default red) or #1A6B3E (green)
+            </p>
+          </div>
+
+          {/* Live preview chips */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs text-gray-500 font-medium">Preview</span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: accentColor }}>
+                Button
+              </span>
+              <span className="text-sm font-semibold" style={{ color: accentColor }}>
+                Heading text
+              </span>
+              <span className="rounded-full border-2 px-3 py-1 text-xs font-semibold" style={{ borderColor: accentColor, color: accentColor }}>
+                Badge
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => setAccentColor("#C0392B")}
+            className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Reset to default red
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveBranding}
+            disabled={savingBranding}
+            className="rounded-lg bg-brand-red text-white text-sm font-semibold px-4 py-2.5 hover:bg-brand-red/90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+          >
+            {savingBranding ? "Saving…" : "Save branding"}
+          </button>
+        </div>
       </div>
 
       <div className="rounded-xl bg-brand-cream p-5 sm:p-8">

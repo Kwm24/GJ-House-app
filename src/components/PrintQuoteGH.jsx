@@ -35,6 +35,9 @@ import {
 
 // ─── PRINT STYLES (injected into <head>) ─────────────────────────────────────
 const PRINT_CSS = `
+/* Accent colour — overridden at runtime by AccentColorInjector */
+:root { --br: #C0392B; }
+
 @media print {
   body { background: #fff !important; margin: 0; }
   .no-print { display: none !important; }
@@ -817,7 +820,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                 {BINDING_TYPES.find(b => b.value === job.bindingType)?.label}<br />
                 <span style={{ fontSize: 13, fontWeight: 700 }}>GH₵ {getBindingRate(job.bindingType, rates).toFixed(2)}</span>
                 <span style={{ fontSize: 10, color: "#5DADE2" }}> per copy</span>
-                <p style={{ ...S.hint, color: "#5DADE2", marginTop: 4 }}>Edit rate in Rate Settings below</p>
+                {!csMode && <p style={{ ...S.hint, color: "#5DADE2", marginTop: 4 }}>Edit rate in Rate Settings below</p>}
               </div>
             </div>
 
@@ -851,7 +854,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                       <label style={S.lbl}>Lam. rate (GHS/copy)</label>
                       <input style={{ ...S.inp, background: "#EDE7D9", color: "#666" }}
                         value={getLamRate(job.laminationType, rates).toFixed(2)} readOnly />
-                      <p style={S.hint}>Edit in Rate Settings below</p>
+                      {!csMode && <p style={S.hint}>Edit in Rate Settings below</p>}
                     </div>
                   )}
                 </div>
@@ -916,8 +919,8 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
             </div>
           </div>
 
-          {/* ── 05 Rate Settings ── */}
-          <div style={S.card}>
+          {/* ── 05 Rate Settings (Admin only — hidden in CS mode) ── */}
+          {!csMode && <div style={S.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setRatesOpen(o => !o)}>
               <div style={S.cTitle}>⚙ Rate settings (GHS)</div>
               <span style={{ fontSize: 11, color: "#888" }}>{ratesOpen ? "▲ collapse" : "▼ expand"}</span>
@@ -952,7 +955,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                 </div>
               </>
             )}
-          </div>
+          </div>}
 
           {/* ── Generate ── */}
           <div style={{ textAlign: "center", marginBottom: 24 }}>
@@ -979,7 +982,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                 <div style={{ fontSize: 11, color: "#666" }}>{company.phone} · {company.email}</div>
               </div>
               <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#C0392B", letterSpacing: 1 }}>PRINTING QUOTATION</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--br, #C0392B)", letterSpacing: 1 }}>PRINTING QUOTATION</div>
                 <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>Ref: <b>{quoteRef}</b></div>
                 {job.invoiceNo && <div style={{ fontSize: 12, color: "#555" }}>Invoice No: <b>{job.invoiceNo}</b></div>}
                 <div style={{ fontSize: 12, color: "#555" }}>Date: {job.date}</div>

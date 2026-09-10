@@ -3,13 +3,19 @@
  * General-purpose quotation / invoice / receipt builder.
  * Picks items from the catalogue (or custom), calculates totals,
  * saves to Supabase, and prints a professional document.
+ *
+ * Supports:
+ *  - Company logo (top-left of print header)
+ *  - Accent colour (from admin settings) used in print CSS
+ *  - Import line-items from a saved print quote (localStorage)
  */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useAuth } from "../AuthProvider.jsx";
 import {
   saveInvoice, genInvoiceRef,
   INVOICE_TYPES, INVOICE_STATUSES, STATUS_COLORS,
 } from "../../lib/invoices.js";
+import { loadSavedQuotes } from "../../lib/quoteStorage.js";
 import { formatGHS as GHS } from "../../lib/currency.js";
 
 const VAT_RATE = 0.20;
@@ -24,14 +30,20 @@ const sel = inp;
 
 // ─── Print document ───────────────────────────────────────────────────────────
 function buildPrintHtml(state, company) {
+  const accent = company.accentHex || "#C0392B";
+
   const typeLabel =
     state.docType === "receipt" ? "RECEIPT"
     : state.docType === "invoice" ? "INVOICE"
     : "QUOTATION";
 
   const fmt = (n) =>
-    "GH₵ " +
+    "GH₵ " +
     Number(n || 0).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const logoHtml = company.logoUrl
+    ? `<img src="${company.logoUrl}" alt="${company.name}" style="max-height:64px;max-width:180px;object-fit:contain;display:block;margin-bottom:8px">`
+    : "";
 
   const validLines = state.lineItems.filter((li) => li.name);
   const linesHtml = validLines
@@ -55,21 +67,21 @@ function buildPrintHtml(state, company) {
   const totalsRows = [
     `<tr><td style="padding:6px 0;font-size:12px;color:#555">Subtotal</td><td style="padding:6px 0;font-size:12px;text-align:right;font-variant-numeric:tabular-nums">${fmt(state.subtotal)}</td></tr>`,
     state.discountPct > 0
-      ? `<tr><td style="padding:6px 0;font-size:12px;color:#555">Discount (${state.discountPct}%)</td><td style="padding:6px 0;font-size:12px;text-align:right;color:#C0392B">- ${fmt(state.discountAmt)}</td></tr>`
+      ? `<tr><td style="padding:6px 0;font-size:12px;color:#555">Discount (${state.discountPct}%)</td><td style="padding:6px 0;font-size:12px;text-align:right;color:${accent}">- ${fmt(state.discountAmt)}</td></tr>`
       : "",
     state.vatAmt > 0
       ? `<tr><td style="padding:6px 0;font-size:12px;color:#555">VAT (20%)</td><td style="padding:6px 0;font-size:12px;text-align:right">+ ${fmt(state.vatAmt)}</td></tr>`
       : "",
     `<tr style="border-top:2px solid #1C1C1E">
        <td style="padding:10px 0 0;font-size:15px;font-weight:800">TOTAL</td>
-       <td style="padding:10px 0 0;font-size:15px;font-weight:800;text-align:right;color:#C0392B;white-space:nowrap">${fmt(state.total)}</td>
+       <td style="padding:10px 0 0;font-size:15px;font-weight:800;text-align:right;color:${accent};white-space:nowrap">${fmt(state.total)}</td>
      </tr>`,
   ].join("");
 
   const depositRow =
     state.docType === "quote"
       ? `<p style="margin-top:16px;font-size:12px;color:#555">
-           <strong>60% deposit required:</strong> ${fmt(round2(state.total * 0.6))} &nbsp;|&nbsp;
+           <strong style="color:${accent}">60% deposit required:</strong> ${fmt(round2(state.total * 0.6))} &nbsp;|&nbsp;
            <strong>Balance on delivery:</strong> ${fmt(round2(state.total * 0.4))}
          </p>`
       : "";
@@ -85,7 +97,7 @@ function buildPrintHtml(state, company) {
     .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:32px; padding-bottom:20px; border-bottom:2px solid #1C1C1E; }
     .company-name { font-size:20px; font-weight:800; letter-spacing:-0.5px; }
     .company-sub { font-size:11px; color:#666; margin-top:2px; }
-    .doc-title { font-size:22px; font-weight:800; color:#C0392B; letter-spacing:1px; text-align:right; }
+    .doc-title { font-size:22px; font-weight:800; color:${accent}; letter-spacing:1px; text-align:right; }
     .doc-meta { font-size:11px; color:#555; text-align:right; margin-top:4px; line-height:1.8; }
     .bill-to { margin-bottom:28px; display:flex; gap:40px; }
     .bill-section { flex:1; }
@@ -111,9 +123,11 @@ function buildPrintHtml(state, company) {
 <body>
   <div class="header">
     <div>
+      ${logoHtml}
       <div class="company-name">${company.name}</div>
       <div class="company-sub">${company.address}</div>
       <div class="company-sub">${company.phone} &middot; ${company.email}</div>
+      ${company.vatNo ? `<div class="company-sub" style="margin-top:4px;font-size:10px;color:#999">${company.vatNo}</div>` : ""}
     </div>
     <div>
       <div class="doc-title">${typeLabel}</div>
@@ -175,6 +189,21 @@ function buildPrintHtml(state, company) {
 </html>`;
 }
 
+// ─── Build a one-line spec summary from a saved print-quote snapshot ──────────
+function buildSpecSummary(snap) {
+  const j = snap.job || {};
+  const sz = j.bookSize === "custom"
+    ? `${j.bookW}″×${j.bookH}″`
+    : (j.bookSize || "");
+  const pages = j.numPages ? `${j.numPages}pp` : "";
+  const body  = j.colours === "4" ? "FC body" : `${j.colours || "1"}C body`;
+  const cover = j.hasCover
+    ? `, FC cover${j.laminationType && j.laminationType !== "none" ? ` (${j.laminationType} lam)` : ""}`
+    : "";
+  const binding = j.bindingType ? `, ${j.bindingType} bound` : "";
+  return [sz, pages, body + cover + binding].filter(Boolean).join(" · ");
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function InvoiceBuilder({
   initial = null,
@@ -204,6 +233,59 @@ export default function InvoiceBuilder({
   const [notes,       setNotes]       = useState(initial?.notes ?? "");
   const [saving,      setSaving]      = useState(false);
   const [error,       setError]       = useState("");
+
+  // ── Print-quote import
+  const [savedPrintQuotes, setSavedPrintQuotes] = useState([]);
+  const [importQuoteRef,   setImportQuoteRef]   = useState("");
+  const [importQty,        setImportQty]        = useState("");
+
+  useEffect(() => {
+    try { setSavedPrintQuotes(loadSavedQuotes()); } catch {}
+  }, []);
+
+  const selectedImportQuote = useMemo(
+    () => savedPrintQuotes.find((q) => q.ref === importQuoteRef) ?? null,
+    [savedPrintQuotes, importQuoteRef]
+  );
+
+  function applyPrintQuoteImport() {
+    if (!selectedImportQuote || !importQty) return;
+    const snap   = selectedImportQuote;
+    const qtyNum = Number(importQty);
+    const result = snap.results?.[qtyNum];
+    if (!result) return;
+
+    const specSummary  = buildSpecSummary(snap);
+    // Use price-per-copy BEFORE VAT so the invoice VAT toggle is accurate
+    const pricePerCopy = result.orderedQty > 0
+      ? round2((result.beforeVAT ?? result.grandTotal) / result.orderedQty)
+      : round2(result.unitPrice ?? 0);
+
+    setClientName(snap.clientName || "");
+    setClientPhone(snap.clientPhone || "");
+    setClientEmail(snap.clientEmail || "");
+
+    setLineItems([{
+      _key:        crypto.randomUUID(),
+      itemId:      "",
+      name:        snap.jobTitle || "Book printing",
+      description: specSummary,
+      unit:        "copy",
+      qty:         result.orderedQty ?? qtyNum,
+      unitPrice:   pricePerCopy,
+    }]);
+
+    // Mirror VAT setting from original quote
+    setApplyVAT(!!(snap.job?.applyVAT));
+
+    // Leave a reference note
+    const existingNotes = notes.trim();
+    setNotes(`Based on print quote ${snap.ref}${existingNotes ? "\n" + existingNotes : ""}`);
+
+    // Reset the picker
+    setImportQuoteRef("");
+    setImportQty("");
+  }
 
   // ── Type change → new ref (unless editing existing record)
   function handleTypeChange(t) {
@@ -241,10 +323,10 @@ export default function InvoiceBuilder({
     () => round2(lineItems.reduce((sum, li) => sum + Number(li.qty || 0) * Number(li.unitPrice || 0), 0)),
     [lineItems]
   );
-  const discountAmt = round2(subtotal * (discountPct / 100));
+  const discountAmt   = round2(subtotal * (discountPct / 100));
   const afterDiscount = round2(subtotal - discountAmt);
-  const vatAmt = applyVAT ? round2(afterDiscount * VAT_RATE) : 0;
-  const total = round2(afterDiscount + vatAmt);
+  const vatAmt        = applyVAT ? round2(afterDiscount * VAT_RATE) : 0;
+  const total         = round2(afterDiscount + vatAmt);
 
   // ── Save
   async function handleSave() {
@@ -300,6 +382,10 @@ export default function InvoiceBuilder({
     if (win) { win.document.write(html); win.document.close(); }
   }
 
+  const inpAmber =
+    "w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-gray-900 " +
+    "placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-400/40 focus:border-amber-500";
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
 
@@ -308,6 +394,68 @@ export default function InvoiceBuilder({
         className="text-sm font-medium text-brand-cream/70 hover:text-brand-cream transition-colors mb-6 block">
         ← Back to invoices
       </button>
+
+      {/* ── 00 — Import from print quote ── */}
+      {savedPrintQuotes.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 sm:p-5 mb-4">
+          <div className="text-xs font-semibold uppercase tracking-widest text-amber-700 mb-1">
+            Import from saved print quote
+          </div>
+          <p className="text-xs text-amber-600 mb-3">
+            Select a saved print quote to auto-fill client info and line items.
+          </p>
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="flex-1 min-w-[220px]">
+              <label className="block text-xs font-medium text-amber-700 mb-1.5">Select print quote</label>
+              <select
+                className={inpAmber}
+                value={importQuoteRef}
+                onChange={(e) => { setImportQuoteRef(e.target.value); setImportQty(""); }}
+              >
+                <option value="">— choose a saved print quote —</option>
+                {savedPrintQuotes.map((q) => (
+                  <option key={q.ref} value={q.ref}>
+                    {q.ref} · {q.jobTitle || "Untitled"} · {q.clientName || "No client"}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedImportQuote?.resultQtys?.length > 0 && (
+              <div>
+                <label className="block text-xs font-medium text-amber-700 mb-1.5">Quantity</label>
+                <select
+                  className={inpAmber}
+                  value={importQty}
+                  onChange={(e) => setImportQty(e.target.value)}
+                  style={{ minWidth: 160 }}
+                >
+                  <option value="">— select qty —</option>
+                  {selectedImportQuote.resultQtys.map((q) => {
+                    const r = selectedImportQuote.results?.[q];
+                    return (
+                      <option key={q} value={q}>
+                        {Number(q).toLocaleString()} copies
+                        {r?.grandTotal ? ` — GH₵ ${Number(r.grandTotal).toLocaleString("en-GH", { minimumFractionDigits: 2 })}` : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
+
+            {importQty && (
+              <button
+                type="button"
+                onClick={applyPrintQuoteImport}
+                className="rounded-lg bg-amber-600 text-white text-sm font-semibold px-4 py-2 hover:bg-amber-700 transition-colors shrink-0"
+              >
+                Apply →
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── 01 Document type + meta ── */}
       <div className="rounded-xl bg-brand-cream p-5 sm:p-6 mb-4">

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./components/AuthProvider.jsx";
 import { ProtectedRoute } from "./components/ProtectedRoute.jsx";
+import { AccentColorInjector } from "./components/AccentColorInjector.jsx";
 import { AuthLayout } from "./layouts/AuthLayout.jsx";
 import { DashboardLayout } from "./layouts/DashboardLayout.jsx";
 import { Login } from "./pages/Login.jsx";
@@ -16,6 +17,7 @@ export function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <AccentColorInjector />
         <Routes>
           <Route path="/" element={<RootRedirect />} />
 
