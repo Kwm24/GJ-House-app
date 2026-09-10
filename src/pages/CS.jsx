@@ -1,15 +1,19 @@
 import { useState } from "react";
 import { LobbyHeader } from "../components/LobbyHeader.jsx";
 import { QuotesTab } from "../components/cs/QuotesTab.jsx";
+import { InvoicesTab } from "../components/cs/InvoicesTab.jsx";
+import { ItemsTab } from "../components/cs/ItemsTab.jsx";
 import { ExpenditureRecorder } from "../components/ExpenditureRecorder.jsx";
 import { SentTab } from "../components/cs/SentTab.jsx";
 import { ResourcesTab } from "../components/cs/ResourcesTab.jsx";
 
 const TABS = [
-  { id: "quotes", label: "Quotes" },
-  { id: "expenditure", label: "Expenditure" },
-  { id: "sent", label: "Sent" },
-  { id: "resources", label: "Resources" },
+  { id: "quotes",      label: "Print Quotes" },
+  { id: "invoices",    label: "Invoices"     },
+  { id: "items",       label: "Items"        },
+  { id: "expenditure", label: "Expenditure"  },
+  { id: "sent",        label: "Sent"         },
+  { id: "resources",   label: "Resources"    },
 ];
 
 export function CS() {
@@ -48,10 +52,12 @@ export function CS() {
       </nav>
 
       <div className="min-h-[calc(100vh-8rem)]">
-        {activeTab === "quotes" && <QuotesTab />}
+        {activeTab === "quotes"      && <QuotesTab />}
+        {activeTab === "invoices"    && <InvoicesTab />}
+        {activeTab === "items"       && <ItemsTab />}
         {activeTab === "expenditure" && <ExpenditureRecorder recordedBy="cs" />}
-        {activeTab === "sent" && <SentTab />}
-        {activeTab === "resources" && <ResourcesTab />}
+        {activeTab === "sent"        && <SentTab />}
+        {activeTab === "resources"   && <ResourcesTab />}
       </div>
     </div>
   );
