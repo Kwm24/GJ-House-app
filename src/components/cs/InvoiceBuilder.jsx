@@ -237,7 +237,6 @@ export default function InvoiceBuilder({
   // ── Print-quote import
   const [savedPrintQuotes, setSavedPrintQuotes] = useState([]);
   const [importQuoteRef,   setImportQuoteRef]   = useState("");
-  const [importQty,        setImportQty]        = useState("");
 
   useEffect(() => {
     try { setSavedPrintQuotes(loadSavedQuotes()); } catch {}
@@ -248,15 +247,13 @@ export default function InvoiceBuilder({
     [savedPrintQuotes, importQuoteRef]
   );
 
-  function applyPrintQuoteImport() {
-    if (!selectedImportQuote || !importQty) return;
-    const snap   = selectedImportQuote;
-    const qtyNum = Number(importQty);
+  // Called immediately when the user picks a quantity — no extra button needed.
+  function applyPrintQuoteImport(snap, qtyNum) {
     const result = snap.results?.[qtyNum];
     if (!result) return;
 
     const specSummary  = buildSpecSummary(snap);
-    // Use price-per-copy BEFORE VAT so the invoice VAT toggle is accurate
+    // Use price-per-copy BEFORE VAT so the invoice VAT toggle stays accurate
     const pricePerCopy = result.orderedQty > 0
       ? round2((result.beforeVAT ?? result.grandTotal) / result.orderedQty)
       : round2(result.unitPrice ?? 0);
@@ -279,12 +276,13 @@ export default function InvoiceBuilder({
     setApplyVAT(!!(snap.job?.applyVAT));
 
     // Leave a reference note
-    const existingNotes = notes.trim();
-    setNotes(`Based on print quote ${snap.ref}${existingNotes ? "\n" + existingNotes : ""}`);
+    setNotes((prev) => {
+      const base = `Based on print quote ${snap.ref}`;
+      return prev.trim() ? `${base}\n${prev.trim()}` : base;
+    });
 
-    // Reset the picker
-    setImportQuoteRef("");
-    setImportQty("");
+    // Keep the picker on this quote so the user can see what was applied;
+    // they can change the quantity again or pick a different quote.
   }
 
   // ── Type change → new ref (unless editing existing record)
@@ -395,67 +393,80 @@ export default function InvoiceBuilder({
         ← Back to invoices
       </button>
 
-      {/* ── 00 — Import from print quote ── */}
-      {savedPrintQuotes.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 sm:p-5 mb-4">
-          <div className="text-xs font-semibold uppercase tracking-widest text-amber-700 mb-1">
+      {/* ── 00 — Import from print quote ── always visible ── */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 sm:p-5 mb-4">
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <div className="text-xs font-semibold uppercase tracking-widest text-amber-700">
             Import from saved print quote
           </div>
-          <p className="text-xs text-amber-600 mb-3">
-            Select a saved print quote to auto-fill client info and line items.
-          </p>
-          <div className="flex flex-wrap gap-3 items-end">
-            <div className="flex-1 min-w-[220px]">
-              <label className="block text-xs font-medium text-amber-700 mb-1.5">Select print quote</label>
-              <select
-                className={inpAmber}
-                value={importQuoteRef}
-                onChange={(e) => { setImportQuoteRef(e.target.value); setImportQty(""); }}
-              >
-                <option value="">— choose a saved print quote —</option>
-                {savedPrintQuotes.map((q) => (
-                  <option key={q.ref} value={q.ref}>
-                    {q.ref} · {q.jobTitle || "Untitled"} · {q.clientName || "No client"}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <span className="text-[10px] font-medium text-amber-500 bg-amber-100 rounded px-2 py-0.5 shrink-0">optional</span>
+        </div>
 
-            {selectedImportQuote?.resultQtys?.length > 0 && (
-              <div>
-                <label className="block text-xs font-medium text-amber-700 mb-1.5">Quantity</label>
+        {savedPrintQuotes.length === 0 ? (
+          <p className="text-xs text-amber-700/70 leading-relaxed">
+            No saved print quotes found. Go to <strong>Print Quotes → Create Quote</strong>, generate a
+            quote and click <strong>💾 Save quote</strong> — it will then appear here so you can
+            pull it directly into this invoice.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-amber-600 mb-3">
+              Select a quote, then pick the quantity — fields fill in automatically.
+            </p>
+            <div className="flex flex-wrap gap-3 items-end">
+              {/* Step 1 — pick quote */}
+              <div className="flex-1 min-w-[220px]">
+                <label className="block text-xs font-medium text-amber-700 mb-1.5">
+                  1 · Select print quote
+                </label>
                 <select
                   className={inpAmber}
-                  value={importQty}
-                  onChange={(e) => setImportQty(e.target.value)}
-                  style={{ minWidth: 160 }}
+                  value={importQuoteRef}
+                  onChange={(e) => setImportQuoteRef(e.target.value)}
                 >
-                  <option value="">— select qty —</option>
-                  {selectedImportQuote.resultQtys.map((q) => {
-                    const r = selectedImportQuote.results?.[q];
-                    return (
-                      <option key={q} value={q}>
-                        {Number(q).toLocaleString()} copies
-                        {r?.grandTotal ? ` — GH₵ ${Number(r.grandTotal).toLocaleString("en-GH", { minimumFractionDigits: 2 })}` : ""}
-                      </option>
-                    );
-                  })}
+                  <option value="">— choose a saved print quote —</option>
+                  {savedPrintQuotes.map((q) => (
+                    <option key={q.ref} value={q.ref}>
+                      {q.ref} · {q.jobTitle || "Untitled"} · {q.clientName || "No client"}
+                    </option>
+                  ))}
                 </select>
               </div>
-            )}
 
-            {importQty && (
-              <button
-                type="button"
-                onClick={applyPrintQuoteImport}
-                className="rounded-lg bg-amber-600 text-white text-sm font-semibold px-4 py-2 hover:bg-amber-700 transition-colors shrink-0"
-              >
-                Apply →
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+              {/* Step 2 — pick quantity → auto-applies immediately */}
+              {selectedImportQuote?.resultQtys?.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-amber-700 mb-1.5">
+                    2 · Select quantity (auto-fills form)
+                  </label>
+                  <select
+                    className={inpAmber}
+                    defaultValue=""
+                    style={{ minWidth: 200 }}
+                    onChange={(e) => {
+                      const qty = Number(e.target.value);
+                      if (qty) applyPrintQuoteImport(selectedImportQuote, qty);
+                    }}
+                  >
+                    <option value="">— pick quantity to import —</option>
+                    {selectedImportQuote.resultQtys.map((q) => {
+                      const r = selectedImportQuote.results?.[q];
+                      return (
+                        <option key={q} value={q}>
+                          {Number(q).toLocaleString()} copies
+                          {r?.grandTotal
+                            ? ` — GH₵ ${Number(r.grandTotal).toLocaleString("en-GH", { minimumFractionDigits: 2 })}`
+                            : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
 
       {/* ── 01 Document type + meta ── */}
       <div className="rounded-xl bg-brand-cream p-5 sm:p-6 mb-4">
