@@ -5,11 +5,13 @@ import { InvoicesTab } from "../components/cs/InvoicesTab.jsx";
 import { ItemsTab } from "../components/cs/ItemsTab.jsx";
 import { ExpenditureRecorder } from "../components/ExpenditureRecorder.jsx";
 import { SentTab } from "../components/cs/SentTab.jsx";
+import { JobsTab } from "../components/cs/JobsTab.jsx";
 import { ResourcesTab } from "../components/cs/ResourcesTab.jsx";
 
 const TABS = [
   { id: "quotes",      label: "Print Quotes" },
   { id: "invoices",    label: "Invoices"     },
+  { id: "jobs",        label: "Jobs"         },
   { id: "items",       label: "Items"        },
   { id: "expenditure", label: "Expenditure"  },
   { id: "sent",        label: "Sent"         },
@@ -54,6 +56,7 @@ export function CS() {
       <div className="min-h-[calc(100vh-8rem)]">
         {activeTab === "quotes"      && <QuotesTab />}
         {activeTab === "invoices"    && <InvoicesTab />}
+        {activeTab === "jobs"        && <JobsTab />}
         {activeTab === "items"       && <ItemsTab />}
         {activeTab === "expenditure" && <ExpenditureRecorder recordedBy="cs" />}
         {activeTab === "sent"        && <SentTab />}

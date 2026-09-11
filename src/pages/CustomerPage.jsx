@@ -24,6 +24,7 @@ const STAGES = [
   { key: "at_finishing",     label: "At Finishing",     emoji: "✂️"  },
   { key: "ready_for_pickup", label: "Ready for Pickup", emoji: "📦"  },
   { key: "delivered",        label: "Collected",        emoji: "🎉"  },
+  { key: "completed",        label: "Job Completed",    emoji: "⭐"  },
 ];
 
 const STATUS_BADGE = {
@@ -35,6 +36,7 @@ const STATUS_BADGE = {
   at_finishing:     "bg-orange-100 text-orange-800",
   ready_for_pickup: "bg-teal-100 text-teal-800",
   delivered:        "bg-gray-100 text-gray-800",
+  completed:        "bg-green-700 text-white",
 };
 
 function stageLabel(status) {

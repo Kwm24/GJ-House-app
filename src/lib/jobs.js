@@ -196,6 +196,17 @@ export async function assignCustomerToJob(jobId, customerUserId) {
   return data;
 }
 
+// Every job — for CS lobby's Jobs tab (CS can see all regardless of status).
+export async function listAllJobsForCS() {
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
 // All jobs visible to the currently logged-in customer.
 export async function listCustomerJobs() {
   const { data, error } = await supabase
