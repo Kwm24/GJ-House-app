@@ -247,9 +247,24 @@ export default function InvoiceBuilder({
     [savedPrintQuotes, importQuoteRef]
   );
 
+  // Quantities available to import — prefer resultQtys, fall back to results
+  // object keys for quotes saved before the fix (which omitted resultQtys).
+  const importableQtys = useMemo(() => {
+    if (!selectedImportQuote) return [];
+    if (selectedImportQuote.resultQtys?.length > 0)
+      return selectedImportQuote.resultQtys.map(Number);
+    // Fallback: derive from results keys
+    const keys = Object.keys(selectedImportQuote.results || {})
+      .map(Number)
+      .filter((n) => !isNaN(n) && n > 0)
+      .sort((a, b) => a - b);
+    return keys;
+  }, [selectedImportQuote]);
+
   // Called immediately when the user picks a quantity — no extra button needed.
   function applyPrintQuoteImport(snap, qtyNum) {
-    const result = snap.results?.[qtyNum];
+    // JSON round-trip turns numeric keys to strings, so check both
+    const result = snap.results?.[qtyNum] ?? snap.results?.[String(qtyNum)];
     if (!result) return;
 
     const specSummary  = buildSpecSummary(snap);
@@ -434,7 +449,7 @@ export default function InvoiceBuilder({
               </div>
 
               {/* Step 2 — pick quantity → auto-applies immediately */}
-              {selectedImportQuote?.resultQtys?.length > 0 && (
+              {selectedImportQuote && importableQtys.length > 0 && (
                 <div>
                   <label className="block text-xs font-medium text-amber-700 mb-1.5">
                     2 · Select quantity (auto-fills form)
@@ -449,8 +464,9 @@ export default function InvoiceBuilder({
                     }}
                   >
                     <option value="">— pick quantity to import —</option>
-                    {selectedImportQuote.resultQtys.map((q) => {
-                      const r = selectedImportQuote.results?.[q];
+                    {importableQtys.map((q) => {
+                      const r = selectedImportQuote.results?.[q]
+                             ?? selectedImportQuote.results?.[String(q)];
                       return (
                         <option key={q} value={q}>
                           {Number(q).toLocaleString()} copies
@@ -461,6 +477,15 @@ export default function InvoiceBuilder({
                       );
                     })}
                   </select>
+                </div>
+              )}
+
+              {/* No results saved — tell user to regenerate */}
+              {selectedImportQuote && importableQtys.length === 0 && (
+                <div className="text-xs text-amber-700 bg-amber-100 rounded-lg px-3 py-2 border border-amber-200 max-w-xs">
+                  ⚠ This quote was saved without generating results. Open it in
+                  <strong> Print Quotes</strong>, click <strong>Generate quote →</strong>
+                  then <strong>💾 Save quote</strong> again to make it importable.
                 </div>
               )}
             </div>

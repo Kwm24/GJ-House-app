@@ -534,17 +534,16 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
   }
 
   // ── Save quote ──
+  // Uses buildQuoteSnapshot() so results & resultQtys are included —
+  // required for the Invoice tab's "Import from print quote" feature.
   const saveQuote = () => {
+    if (!resultQtys.length) {
+      alert("Please generate the quote first (click Generate quote →) before saving.");
+      return;
+    }
     const ref = quoteRef || genRefNo();
-    setQuoteRef(ref);
-    const snapshot = {
-      ref,
-      date: job.date,
-      clientName: job.clientName,
-      jobTitle: job.jobTitle,
-      job: { ...job },
-      rates: { ...rates },
-    };
+    if (!quoteRef) setQuoteRef(ref);
+    const snapshot = { ...buildQuoteSnapshot(), ref };
     try {
       saveQuoteToStorage(snapshot);
       alert(`Quote ${ref} saved!`);
