@@ -31,26 +31,25 @@ export async function getProfile(userId) {
   return data;
 }
 
-// Self-registration for customers. Creates an Auth user then inserts a
-// profiles row with role = "customer". Returns the new profile.
+// Self-registration for customers.
+// Passes full_name, phone, and role as user metadata so the database trigger
+// (015_auth_trigger.sql) can create the profiles row server-side — this avoids
+// any RLS issues that occur when email confirmation is enabled and there is
+// no active session at the point the profile needs to be inserted.
 export async function signUpCustomer({ fullName, phone, email, password }) {
   const { data: authData, error: authErr } = await supabase.auth.signUp({
     email,
     password,
+    options: {
+      data: {
+        role:      "customer",
+        full_name: fullName.trim(),
+        phone:     phone.trim() || null,
+      },
+    },
   });
   if (authErr) throw authErr;
-
-  const userId = authData.user?.id;
-  if (!userId) throw new Error("Sign-up succeeded but no user ID was returned.");
-
-  const { error: profileErr } = await supabase.from("profiles").insert({
-    user_id: userId,
-    role: "customer",
-    full_name: fullName.trim(),
-    phone: phone.trim() || null,
-  });
-  if (profileErr) throw profileErr;
-
+  if (!authData.user?.id) throw new Error("Sign-up succeeded but no user ID was returned.");
   return authData;
 }
 
