@@ -341,25 +341,26 @@ export default function InvoiceBuilder({
   const vatAmt        = applyVAT ? round2(afterDiscount * VAT_RATE) : 0;
   const total         = round2(afterDiscount + vatAmt);
 
-  // ── Save
-  async function handleSave() {
+  // ── Shared save — called by handleSave, handleMarkSent, handleMarkPaid
+  async function buildAndSave(overrideStatus) {
     const validLines = lineItems.filter((li) => li.name.trim() && Number(li.qty) > 0);
     if (validLines.length === 0) {
       setError("Add at least one line item with a name and quantity greater than zero.");
-      return;
+      return false;
     }
     setError("");
     setSaving(true);
     try {
+      const newStatus = overrideStatus ?? docStatus;
       const payload = {
-        user_id: user?.id ?? null,
-        ref, type: docType, status: docStatus,
+        user_id:      user?.id ?? null,
+        ref, type:    docType, status: newStatus,
         client_name:  clientName  || null,
         client_phone: clientPhone || null,
         client_email: clientEmail || null,
         date,
-        due_date: dueDate || null,
-        line_items: validLines.map((li) => ({
+        due_date:     dueDate || null,
+        line_items:   validLines.map((li) => ({
           itemId:      li.itemId  || null,
           name:        li.name,
           description: li.description || "",
@@ -368,20 +369,88 @@ export default function InvoiceBuilder({
           unitPrice:   Number(li.unitPrice),
           total:       round2(Number(li.qty) * Number(li.unitPrice)),
         })),
-        subtotal,
-        discount_pct: discountPct,
-        discount_amt: discountAmt,
-        vat_amt:      vatAmt,
-        total,
-        notes: notes || null,
+        subtotal, discount_pct: discountPct, discount_amt: discountAmt,
+        vat_amt: vatAmt, total, notes: notes || null,
       };
       const result = await saveInvoice(payload, isEdit ? initial.id : null);
+      if (overrideStatus) setDocStatus(overrideStatus);
       onSaved(result);
+      return true;
     } catch (err) {
       setError(err.message ?? "Could not save.");
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSave()      { await buildAndSave(); }
+  async function handleMarkSent()  { await buildAndSave("sent"); }
+  async function handleMarkPaid()  { await buildAndSave("paid"); }
+
+  // ── Send via Email — print first, then open mailto
+  function handleSendEmail() {
+    handlePrint();
+    const typeLabel = docType === "receipt" ? "Receipt"
+      : docType === "invoice" ? "Invoice" : "Quotation";
+    const fmtAmt = (n) =>
+      `GH₵ ${Number(n || 0).toLocaleString("en-GH", { minimumFractionDigits: 2 })}`;
+    const itemLines = lineItems
+      .filter((li) => li.name)
+      .map((li) => `  • ${li.name}${li.description ? ` (${li.description})` : ""} — ${fmtAmt(round2(Number(li.qty) * Number(li.unitPrice)))}`);
+    const body = [
+      `Dear ${clientName || "Valued Customer"},`,
+      "",
+      `Please find ${docType === "receipt" ? "your receipt" : "attached"} ${typeLabel.toLowerCase()} ${ref}.`,
+      "",
+      ...itemLines,
+      "",
+      discountAmt > 0 ? `Discount: -${fmtAmt(discountAmt)}` : null,
+      vatAmt > 0      ? `VAT (20%): +${fmtAmt(vatAmt)}` : null,
+      `TOTAL: ${fmtAmt(total)}`,
+      docType === "quote" ? `60% Deposit required: ${fmtAmt(round2(total * 0.6))}` : null,
+      notes ? `\nNotes: ${notes}` : null,
+      "",
+      `Regards,`,
+      company.name,
+      company.phone || "",
+    ].filter((l) => l !== null).join("\n");
+
+    const subject = encodeURIComponent(`${typeLabel} ${ref} from ${company.name}`);
+    const to = clientEmail ? encodeURIComponent(clientEmail) : "";
+    setTimeout(() => {
+      window.location.href = `mailto:${to}?subject=${subject}&body=${encodeURIComponent(body)}`;
+    }, 600);
+  }
+
+  // ── Send via WhatsApp — print first, then open wa.me
+  function handleSendWhatsApp() {
+    handlePrint();
+    const typeLabel = docType === "receipt" ? "Receipt"
+      : docType === "invoice" ? "Invoice" : "Quotation";
+    const fmtAmt = (n) =>
+      `GH₵ ${Number(n || 0).toLocaleString("en-GH", { minimumFractionDigits: 2 })}`;
+    const msg = [
+      `*${typeLabel} ${ref}* — ${company.name}`,
+      `Date: ${date}`,
+      clientName ? `To: *${clientName}*` : null,
+      "",
+      ...lineItems.filter((li) => li.name).map((li) =>
+        `• ${li.name} — ${fmtAmt(round2(Number(li.qty) * Number(li.unitPrice)))}`),
+      "",
+      discountAmt > 0 ? `Discount: -${fmtAmt(discountAmt)}` : null,
+      vatAmt > 0      ? `VAT: +${fmtAmt(vatAmt)}` : null,
+      `*TOTAL: ${fmtAmt(total)}*`,
+      docType === "quote" ? `Deposit (60%): ${fmtAmt(round2(total * 0.6))}` : null,
+    ].filter((l) => l !== null).join("\n");
+
+    const phone = (clientPhone || "").replace(/\D/g, "");
+    const waUrl = phone
+      ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    setTimeout(() => {
+      window.open(waUrl, "_blank", "noopener,noreferrer");
+    }, 600);
   }
 
   // ── Print
@@ -755,6 +824,7 @@ export default function InvoiceBuilder({
         </div>
       )}
       <div className="flex flex-wrap gap-3">
+        {/* Left group: utility actions */}
         <button
           type="button"
           onClick={onCancel}
@@ -769,6 +839,43 @@ export default function InvoiceBuilder({
         >
           🖨 Print / PDF
         </button>
+        <button
+          type="button"
+          onClick={handleSendEmail}
+          className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-brand-cream hover:bg-white/20 transition-colors"
+        >
+          ✉ Email
+        </button>
+        <button
+          type="button"
+          onClick={handleSendWhatsApp}
+          className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-brand-cream hover:bg-white/20 transition-colors"
+        >
+          💬 WhatsApp
+        </button>
+
+        {/* Right group: status-advancing saves */}
+        <div className="flex-1" />
+        {docStatus !== "sent" && docStatus !== "paid" && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleMarkSent}
+            className="rounded-lg border border-amber-400/60 bg-amber-500/20 px-4 py-2.5 text-sm font-semibold text-amber-200 hover:bg-amber-500/30 disabled:opacity-60 transition-colors"
+          >
+            📤 Mark as Sent
+          </button>
+        )}
+        {docStatus !== "paid" && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleMarkPaid}
+            className="rounded-lg border border-green-400/60 bg-green-500/20 px-4 py-2.5 text-sm font-semibold text-green-200 hover:bg-green-500/30 disabled:opacity-60 transition-colors"
+          >
+            ✓ Payment Received
+          </button>
+        )}
         <button
           type="button"
           disabled={saving}

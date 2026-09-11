@@ -16,9 +16,6 @@
  */
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { useAuth } from "./AuthProvider.jsx";
-import { createJob, updateJobStatus, updateJobQuote, markJobSent } from "../lib/jobs.js";
-import { buildMailtoUrl, buildWhatsAppUrl } from "../lib/quoteShare.js";
 import { saveQuoteToStorage } from "../lib/quoteStorage.js";
 import { getSettings } from "../lib/settings.js";
 import { fitOnSheet, resolveSheetDims } from "../lib/imposition.js";
@@ -353,11 +350,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
   const [ratesOpen, setRatesOpen]     = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [quoteRef, setQuoteRef]       = useState("");
-  const [approving, setApproving]     = useState(false);
-  const [approveMsg, setApproveMsg]   = useState("");
-  const [jobId, setJobId]             = useState(null);
   const printRef = useRef(null);
-  const { user } = useAuth();
 
   // Preload a quote passed in from the saved-quotes list, if any.
   useEffect(() => {
@@ -365,9 +358,6 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
       setJob(initialQuote.job);
       setRates(initialQuote.rates);
       setQuoteRef(initialQuote.ref);
-      // Restore the Supabase job ID so re-approving updates the existing row
-      // rather than creating a duplicate job.
-      setJobId(initialQuote.jobId ?? null);
     }
   }, [initialQuote]);
 
@@ -451,87 +441,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
     rates: { ...rates },
     results: { ...results },
     resultQtys: [...resultQtys],
-    // Persisted so a loaded saved quote can link back to its existing job row.
-    jobId: jobId || null,
   });
-
-  // Creates the job row on first send/approve; later calls reuse it.
-  async function ensureJobId(status) {
-    if (jobId) return jobId;
-    const ref = quoteRef || genRefNo();
-    if (!quoteRef) setQuoteRef(ref);
-    const snapshot = { ...buildQuoteSnapshot(), ref };
-    const job = await createJob(user.id, snapshot, status);
-    setJobId(job.id);
-    return job.id;
-  }
-
-  // Payment confirmed for this quote — this is what other lobbies use to
-  // decide a job is real, not the act of sending it to the client.
-  // CS decides here whether the job needs design work first (routes to the
-  // Designer lobby) or goes straight to Production.
-  async function handleApproveQuote() {
-    if (!user) {
-      setApproveMsg("You must be signed in to approve quotes.");
-      return;
-    }
-    if (!resultQtys.length) return;
-
-    setApproving(true);
-    setApproveMsg("");
-
-    try {
-      const finalStatus = job.needsDesign ? "ready_for_design" : "approved";
-      const snapshot = buildQuoteSnapshot();
-      const id = await ensureJobId(finalStatus);
-
-      // If the job already existed (loaded from saved quotes), sync any
-      // edits (new quantities, rates, specs) back to the Supabase job row.
-      if (jobId) await updateJobQuote(id, { ...snapshot, ref: quoteRef });
-
-      const updatedJob = await updateJobStatus(id, finalStatus);
-
-      // Auto-save to saved quotes with the job ID embedded so future
-      // edits can find and update the correct job row.
-      saveQuoteToStorage({ ...snapshot, jobId: id });
-
-      const deposit = `Deposit: GH₵ ${Number(updatedJob.deposit_amount).toFixed(2)}`;
-      setApproveMsg(
-        job.needsDesign
-          ? `Quote ${updatedJob.quote_ref} approved and sent to design. ${deposit}`
-          : `Quote ${updatedJob.quote_ref} approved. ${deposit}`
-      );
-    } catch (err) {
-      setApproveMsg(err.message ?? "Could not approve quote.");
-    } finally {
-      setApproving(false);
-    }
-  }
-
-  // Prints/saves the PDF first so the client receives an attachment,
-  // then opens the communication channel after the print dialog is closed.
-  function handleSendEmail() {
-    const snapshot = buildQuoteSnapshot();
-    window.print();
-    setTimeout(() => {
-      // Use the client's email as the recipient if it's been filled in.
-      window.location.href = buildMailtoUrl(snapshot, job.clientEmail || "");
-      if (user) {
-        ensureJobId("sent").then((id) => markJobSent(id, "email")).catch(() => {});
-      }
-    }, 500);
-  }
-
-  function handleSendWhatsApp() {
-    const snapshot = buildQuoteSnapshot();
-    window.print();
-    setTimeout(() => {
-      window.open(buildWhatsAppUrl(snapshot), "_blank", "noopener,noreferrer");
-      if (user) {
-        ensureJobId("sent").then((id) => markJobSent(id, "whatsapp")).catch(() => {});
-      }
-    }, 500);
-  }
 
   // ── Save quote ──
   // Uses buildQuoteSnapshot() so results & resultQtys are included —
@@ -1208,56 +1118,12 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
               </div>
             )}
 
-            {/* ── Needs design? (CS decides before approving) ── */}
-            {csMode && (
-              <div className="btn-row" style={{ ...S.togRow, marginTop: 16, cursor: "pointer" }} onClick={() => setJ("needsDesign", !job.needsDesign)}>
-                <div style={S.tog(job.needsDesign)}><div style={S.togDot(job.needsDesign)} /></div>
-                <span style={{ fontSize: 13, color: "#333", fontWeight: 500 }}>This job needs design work first</span>
-                <span style={{ fontSize: 11, color: "#AAA" }}>
-                  {job.needsDesign ? "— will route to the Designer lobby on approval" : "— will go straight to Production on approval"}
-                </span>
-              </div>
-            )}
-
             {/* ── Buttons (screen only) ── */}
             <div className="btn-row" style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 10 }}>
               <button style={{ ...S.btn, ...S.btnS }} onClick={() => setShowResults(false)}>← Edit quote</button>
               <button style={{ ...S.btn, ...S.btnS }} onClick={saveQuote}>💾 Save quote</button>
               <button style={{ ...S.btn, ...S.btnP }} onClick={() => window.print()}>🖨 Print / Save PDF</button>
-              {csMode && (
-                <>
-                  <button style={{ ...S.btn, ...S.btnS }} onClick={handleSendEmail}>
-                    ✉ Send via Email
-                  </button>
-                  <button
-                    style={{ ...S.btn, ...S.btnS, background: "#25D366", color: "#fff" }}
-                    onClick={handleSendWhatsApp}
-                  >
-                    WhatsApp
-                  </button>
-                  <button
-                    style={{ ...S.btn, ...S.btnP, background: "#27AE60" }}
-                    onClick={handleApproveQuote}
-                    disabled={approving}
-                    title="Use once the client's deposit payment is confirmed"
-                  >
-                    {approving ? "Approving…" : "✓ Approve (payment received)"}
-                  </button>
-                </>
-              )}
             </div>
-            {csMode && approveMsg && (
-              <p
-                style={{
-                  marginTop: 12,
-                  fontSize: 12,
-                  color: approveMsg.includes("approved") ? "#27AE60" : "#C0392B",
-                  textAlign: "center",
-                }}
-              >
-                {approveMsg}
-              </p>
-            )}
 
           </div>
         )}
