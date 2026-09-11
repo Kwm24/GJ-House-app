@@ -5,6 +5,7 @@ import { AccentColorInjector } from "./components/AccentColorInjector.jsx";
 import { AuthLayout } from "./layouts/AuthLayout.jsx";
 import { DashboardLayout } from "./layouts/DashboardLayout.jsx";
 import { Login } from "./pages/Login.jsx";
+import { CustomerSignup } from "./pages/CustomerSignup.jsx";
 import { RootRedirect } from "./pages/RootRedirect.jsx";
 import { CS } from "./pages/CS.jsx";
 import { ProductionPage } from "./pages/ProductionPage.jsx";
@@ -22,7 +23,8 @@ export function App() {
           <Route path="/" element={<RootRedirect />} />
 
           <Route element={<AuthLayout />}>
-            <Route path="/login" element={<Login />} />
+            <Route path="/login"  element={<Login />} />
+            <Route path="/signup" element={<CustomerSignup />} />
           </Route>
 
           <Route element={<ProtectedRoute />}>

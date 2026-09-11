@@ -181,3 +181,48 @@ export async function updateJobDeadline(jobId, deadline) {
   if (error) throw error;
   return data;
 }
+
+// Assign (or clear) a registered customer to a job so they can see it in the
+// customer portal. Pass null to unlink.
+export async function assignCustomerToJob(jobId, customerUserId) {
+  const { data, error } = await supabase
+    .from("jobs")
+    .update({ customer_id: customerUserId ?? null })
+    .eq("id", jobId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// All jobs visible to the currently logged-in customer.
+export async function listCustomerJobs() {
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+// List files in job-finals/{jobId}/ from Supabase Storage.
+export async function listJobFinals(jobId) {
+  const { data, error } = await supabase.storage
+    .from("job-finals")
+    .list(jobId, { limit: 50 });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Get a signed URL for a job-final file (valid for 1 hour).
+export async function getJobFinalUrl(jobId, fileName) {
+  const { data, error } = await supabase.storage
+    .from("job-finals")
+    .createSignedUrl(`${jobId}/${fileName}`, 3600);
+
+  if (error) throw error;
+  return data.signedUrl;
+}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { signInWithEmail, getProfile, signOut } from "../lib/auth.js";
 import { getRouteForRole } from "../lib/routes.js";
 import { useAuth } from "../components/AuthProvider.jsx";
@@ -130,8 +130,14 @@ export function Login() {
         </button>
       </form>
 
-      <p className="mt-6 text-center text-xs text-brand-cream/50">
-        Need help? Contact your system administrator.
+      <p className="mt-5 text-center text-sm text-brand-cream/70">
+        New customer?{" "}
+        <Link to="/signup" className="font-semibold text-brand-red hover:underline">
+          Create an account
+        </Link>
+      </p>
+      <p className="mt-3 text-center text-xs text-brand-cream/40">
+        Staff? Contact your system administrator for access.
       </p>
     </div>
   );
