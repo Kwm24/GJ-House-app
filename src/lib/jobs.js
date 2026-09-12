@@ -117,14 +117,29 @@ export async function listProductionJobs() {
   return data;
 }
 
-// Jobs the Designer lobby's job list should show.
+// Jobs the Designer lobby's job list should show:
+// anything in ready_for_design, OR flagged needs_design but not yet terminal.
 export async function listDesignerJobs() {
   const { data, error } = await supabase
     .from("jobs")
     .select("*")
-    .eq("status", "ready_for_design")
+    .or("status.eq.ready_for_design,and(needs_design.eq.true,status.neq.delivered,status.neq.completed)")
     .order("deadline", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data;
+}
+
+// Mark a job as needing design and move it to ready_for_design status.
+// Called from the CS Jobs tab "Send to Design Team" button.
+export async function sendToDesign(jobId) {
+  const { data, error } = await supabase
+    .from("jobs")
+    .update({ needs_design: true, status: "ready_for_design" })
+    .eq("id", jobId)
+    .select()
+    .single();
 
   if (error) throw error;
   return data;

@@ -10,6 +10,7 @@ import {
   updateJobStatus,
   updateJobDeadline,
   assignCustomerToJob,
+  sendToDesign,
   listJobFinals,
   uploadJobFinal,
   deleteJobFinal,
@@ -230,10 +231,12 @@ export function JobsTab() {
         ) : (
           <div className="space-y-3">
             {jobs.map((job) => {
-              const isOpen    = expandedId === job.id;
-              const isSaving  = !!saving[job.id];
-              const feedback  = msg[job.id] ?? "";
-              const linked    = customers.find((c) => c.user_id === job.customer_id);
+              const isOpen      = expandedId === job.id;
+              const isSaving    = !!saving[job.id];
+              const feedback    = msg[job.id] ?? "";
+              const linked      = customers.find((c) => c.user_id === job.customer_id);
+              // A job needs design if the DB flag is set OR the quote snapshot says so
+              const needsDesign = job.needs_design || job.quote?.needsDesign === true;
 
               return (
                 <div
@@ -259,6 +262,9 @@ export function JobsTab() {
                         <p className="text-xs text-green-700 mt-0.5 font-medium">
                           👤 {linked.full_name}
                         </p>
+                      )}
+                      {needsDesign && (
+                        <p className="text-xs text-purple-700 mt-0.5 font-medium">🎨 Needs design</p>
                       )}
                     </div>
 
@@ -308,6 +314,47 @@ export function JobsTab() {
                           ))}
                         </select>
                       </div>
+
+                      {/* Send to Design Team — shown when quote was flagged for design */}
+                      {needsDesign && job.status !== "ready_for_design" && job.status !== "design_ready" && (
+                        <div className="rounded-xl bg-purple-50 border border-purple-200 p-4">
+                          <p className="text-sm font-semibold text-purple-800 mb-1">🎨 This job needs design work</p>
+                          <p className="text-xs text-purple-600 mb-3">
+                            Send it to the Design team — it will appear in the Designer lobby with the spec sheet and any resources you've uploaded.
+                          </p>
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={async () => {
+                              setSavingFor(job.id, true);
+                              try {
+                                const updated = await sendToDesign(job.id);
+                                setJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, ...updated } : j));
+                                setMsgFor(job.id, "✓ Sent to Design team");
+                              } catch (err) {
+                                setMsgFor(job.id, "Error: " + (err.message ?? "Could not update"));
+                              } finally {
+                                setSavingFor(job.id, false);
+                              }
+                            }}
+                            className="inline-flex items-center gap-2 rounded-lg bg-purple-700 text-white text-sm font-semibold px-4 py-2 hover:bg-purple-800 disabled:opacity-60 transition-colors"
+                          >
+                            🎨 Send to Design Team
+                          </button>
+                        </div>
+                      )}
+
+                      {needsDesign && job.status === "ready_for_design" && (
+                        <div className="rounded-xl bg-purple-50 border border-purple-200 px-4 py-3">
+                          <p className="text-xs font-semibold text-purple-700">✓ Currently with the Design team</p>
+                        </div>
+                      )}
+
+                      {needsDesign && job.status === "design_ready" && (
+                        <div className="rounded-xl bg-indigo-50 border border-indigo-200 px-4 py-3">
+                          <p className="text-xs font-semibold text-indigo-700">✓ Design completed by designer</p>
+                        </div>
+                      )}
 
                       {/* Deadline */}
                       <div>

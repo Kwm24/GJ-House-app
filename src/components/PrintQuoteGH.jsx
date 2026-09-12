@@ -433,6 +433,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
     ref: quoteRef || genRefNo(),
     date: job.date,
     clientName: job.clientName,
+    needsDesign: job.needsDesign,
     clientPhone: job.clientPhone,
     clientEmail: job.clientEmail || "",
     jobTitle: job.jobTitle,
@@ -825,6 +826,16 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
               </div>
               <span style={{ fontSize: 13, color: "#333", fontWeight: 500 }}>Apply Ghana VAT (20%)</span>
               <span style={{ fontSize: 11, color: "#AAA" }}>— VAT 15% + NHIL 2.5% + GETFund 2.5%</span>
+            </div>
+
+            <div style={{ ...S.div, marginTop: 8 }} />
+
+            <div style={S.togRow}>
+              <div style={S.tog(job.needsDesign)} onClick={() => setJ("needsDesign", !job.needsDesign)}>
+                <div style={S.togDot(job.needsDesign)} />
+              </div>
+              <span style={{ fontSize: 13, color: "#333", fontWeight: 500 }}>🎨 Job requires design work</span>
+              <span style={{ fontSize: 11, color: "#AAA" }}>— CS will send it to the Design team after approval</span>
             </div>
           </div>
 
