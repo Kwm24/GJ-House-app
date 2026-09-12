@@ -10,7 +10,7 @@
  */
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../components/AuthProvider.jsx";
-import { listCustomerJobs, listJobFinals, getJobFinalUrl } from "../lib/jobs.js";
+import { listCustomerJobs, listJobFinals, getJobFinalUrl, getJobFinalDownloadUrl } from "../lib/jobs.js";
 import { signOut } from "../lib/auth.js";
 import { useNavigate } from "react-router-dom";
 
@@ -220,23 +220,21 @@ function DocumentsTab({ job }) {
 
 // ── Final Artwork tab ──────────────────────────────────────────────────────────
 function ArtworkTab({ job }) {
-  const [files,   setFiles]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [urls,    setUrls]    = useState({});
-  const [error,   setError]   = useState("");
+  const [files,      setFiles]      = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [urls,       setUrls]       = useState({});
+  const [error,      setError]      = useState("");
+  const [dlLoading,  setDlLoading]  = useState({}); // { [fileName]: true }
 
   useEffect(() => {
     setLoading(true);
     listJobFinals(job.id)
       .then(async (items) => {
         setFiles(items);
-        // Pre-fetch signed URLs for all files
         const entries = await Promise.all(
           items.map(async (f) => {
-            try {
-              const url = await getJobFinalUrl(job.id, f.name);
-              return [f.name, url];
-            } catch { return [f.name, null]; }
+            try { return [f.name, await getJobFinalUrl(job.id, f.name)]; }
+            catch { return [f.name, null]; }
           })
         );
         setUrls(Object.fromEntries(entries));
@@ -244,6 +242,21 @@ function ArtworkTab({ job }) {
       .catch((err) => setError(err.message ?? "Could not load artwork."))
       .finally(() => setLoading(false));
   }, [job.id]);
+
+  async function handleDownload(fileName) {
+    setDlLoading((d) => ({ ...d, [fileName]: true }));
+    try {
+      const url = await getJobFinalDownloadUrl(job.id, fileName);
+      // Open the signed download URL — browser treats it as a Save-As
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch { /* silently ignore */ }
+    finally { setDlLoading((d) => ({ ...d, [fileName]: false })); }
+  }
 
   if (loading) {
     return (
@@ -276,34 +289,51 @@ function ArtworkTab({ job }) {
   }
 
   const isImage = (name) => /\.(jpe?g|png|gif|webp|svg)$/i.test(name);
-  const isVideo = (name) => /\.(mp4|mov|webm|avi)$/i.test(name);
+  const isVideo = (name) => /\.(mp4|mov|webm|avi|mkv)$/i.test(name);
 
   return (
     <div className="space-y-4">
+      {/* ⚠️ Expiry notice */}
+      <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex gap-3 items-start">
+        <span className="text-lg shrink-0">⏳</span>
+        <p className="text-xs text-amber-800 leading-relaxed">
+          <strong>Please download and save your files.</strong> These files will be
+          removed from our servers <strong>4 weeks after your job is completed</strong>.
+          We cannot recover them after that date.
+        </p>
+      </div>
+
       {files.map((f) => {
         const url = urls[f.name];
         if (!url) return null;
         return (
           <div key={f.name} className="rounded-xl overflow-hidden border border-gray-200 bg-white">
+            {/* Preview */}
             {isImage(f.name) ? (
               <img src={url} alt={f.name} className="w-full object-contain max-h-[70vh]" />
             ) : isVideo(f.name) ? (
-              <video controls src={url} className="w-full max-h-[70vh]" />
+              <video controls src={url} className="w-full max-h-[70vh]" playsInline />
             ) : (
               <div className="p-4 flex items-center gap-3">
                 <span className="text-2xl">📎</span>
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-medium text-brand-red hover:underline truncate"
-                >
-                  {f.name}
-                </a>
+                <p className="text-sm font-medium text-gray-800 truncate">{f.name}</p>
               </div>
             )}
-            <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
+
+            {/* Footer: filename + download button */}
+            <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
               <p className="text-xs text-gray-500 truncate">{f.name}</p>
+              <button
+                type="button"
+                onClick={() => handleDownload(f.name)}
+                disabled={!!dlLoading[f.name]}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-brand-red text-white text-xs font-semibold px-3 py-1.5 hover:bg-brand-red/90 disabled:opacity-60 transition-colors"
+              >
+                {dlLoading[f.name] ? (
+                  <span className="h-3 w-3 rounded-full border-2 border-white/30 border-t-white animate-spin inline-block" />
+                ) : "⬇"}
+                Download
+              </button>
             </div>
           </div>
         );

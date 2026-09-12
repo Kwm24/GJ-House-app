@@ -237,3 +237,34 @@ export async function getJobFinalUrl(jobId, fileName) {
   if (error) throw error;
   return data.signedUrl;
 }
+
+// Get a signed download URL (forces browser Save-As dialog).
+export async function getJobFinalDownloadUrl(jobId, fileName) {
+  const { data, error } = await supabase.storage
+    .from("job-finals")
+    .createSignedUrl(`${jobId}/${fileName}`, 3600, { download: true });
+
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+// Upload a file (image or video) to job-finals/{jobId}/{fileName}.
+// Overwrites if a file with the same name already exists.
+export async function uploadJobFinal(jobId, file) {
+  const path = `${jobId}/${file.name}`;
+  const { error } = await supabase.storage
+    .from("job-finals")
+    .upload(path, file, { upsert: true });
+
+  if (error) throw error;
+  return path;
+}
+
+// Delete a file from job-finals/{jobId}/{fileName}.
+export async function deleteJobFinal(jobId, fileName) {
+  const { error } = await supabase.storage
+    .from("job-finals")
+    .remove([`${jobId}/${fileName}`]);
+
+  if (error) throw error;
+}

@@ -4,16 +4,29 @@
  * CS can move any job through the entire pipeline (all statuses including
  * "Job Completed") and link jobs to registered customer accounts.
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   listAllJobsForCS,
   updateJobStatus,
   updateJobDeadline,
   assignCustomerToJob,
+  listJobFinals,
+  uploadJobFinal,
+  deleteJobFinal,
+  getJobFinalUrl,
 } from "../../lib/jobs.js";
 import { listCustomers } from "../../lib/auth.js";
 import { CS_STATUS_OPTIONS, jobStatusLabel } from "../../lib/jobStatus.js";
 import { formatGHS } from "../../lib/currency.js";
+
+const ACCEPTED = "image/*,video/*,.pdf";
+const isImage  = (n) => /\.(jpe?g|png|gif|webp|svg)$/i.test(n);
+const isVideo  = (n) => /\.(mp4|mov|webm|avi|mkv)$/i.test(n);
+function fmtBytes(b) {
+  if (b < 1024) return b + " B";
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + " KB";
+  return (b / 1024 / 1024).toFixed(1) + " MB";
+}
 
 const STATUS_BADGE = {
   sent:             "bg-blue-100 text-blue-800",
@@ -43,6 +56,63 @@ export function JobsTab() {
   // Customer picker state
   const [assignSearch, setAssignSearch] = useState("");
 
+  // Final artwork state — keyed by jobId
+  // artworkFiles: { [jobId]: [{name, size, ...}] }
+  // artworkUrls:  { [jobId]: { [fileName]: url } }
+  // artworkLoaded: { [jobId]: true }
+  const [artworkFiles,  setArtworkFiles]  = useState({});
+  const [artworkUrls,   setArtworkUrls]   = useState({});
+  const [artworkLoaded, setArtworkLoaded] = useState({});
+  const [uploading,     setUploading]     = useState({}); // { [jobId]: true }
+  const [uploadMsg,     setUploadMsg]     = useState({}); // { [jobId]: string }
+  const fileInputRef = useRef(null);
+  const [uploadTarget, setUploadTarget] = useState(null); // jobId being uploaded to
+
+  async function loadArtwork(jobId) {
+    try {
+      const files = await listJobFinals(jobId);
+      const entries = await Promise.all(
+        files.map(async (f) => {
+          try { return [f.name, await getJobFinalUrl(jobId, f.name)]; }
+          catch { return [f.name, null]; }
+        })
+      );
+      setArtworkFiles((p) => ({ ...p, [jobId]: files }));
+      setArtworkUrls((p) => ({ ...p, [jobId]: Object.fromEntries(entries) }));
+      setArtworkLoaded((p) => ({ ...p, [jobId]: true }));
+    } catch { /* silently ignore */ }
+  }
+
+  async function handleUpload(jobId, file) {
+    setUploading((u) => ({ ...u, [jobId]: true }));
+    setUploadMsg((m) => ({ ...m, [jobId]: "" }));
+    try {
+      await uploadJobFinal(jobId, file);
+      await loadArtwork(jobId);
+      setUploadMsg((m) => ({ ...m, [jobId]: `✓ "${file.name}" uploaded` }));
+      setTimeout(() => setUploadMsg((m) => ({ ...m, [jobId]: "" })), 3000);
+    } catch (err) {
+      setUploadMsg((m) => ({ ...m, [jobId]: "Error: " + (err.message ?? "Upload failed") }));
+    } finally {
+      setUploading((u) => ({ ...u, [jobId]: false }));
+    }
+  }
+
+  async function handleDeleteArtwork(jobId, fileName) {
+    if (!window.confirm(`Remove "${fileName}" from this job? The customer will no longer see it.`)) return;
+    try {
+      await deleteJobFinal(jobId, fileName);
+      setArtworkFiles((p) => ({ ...p, [jobId]: (p[jobId] ?? []).filter((f) => f.name !== fileName) }));
+      setArtworkUrls((p) => {
+        const next = { ...(p[jobId] ?? {}) };
+        delete next[fileName];
+        return { ...p, [jobId]: next };
+      });
+    } catch (err) {
+      alert("Could not delete: " + (err.message ?? "Unknown error"));
+    }
+  }
+
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
@@ -62,7 +132,11 @@ export function JobsTab() {
   useEffect(() => { load(); }, [load]);
 
   function toggleExpand(id) {
-    setExpandedId((prev) => (prev === id ? null : id));
+    setExpandedId((prev) => {
+      const next = prev === id ? null : id;
+      if (next && !artworkLoaded[next]) loadArtwork(next);
+      return next;
+    });
     setAssignSearch("");
   }
 
@@ -323,6 +397,100 @@ export function JobsTab() {
                               ))
                             )}
                           </div>
+                        )}
+                      </div>
+
+                      {/* ── Final Artwork ── */}
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">
+                          Final Artwork
+                        </label>
+                        <p className="text-xs text-gray-500 mb-3">
+                          Images and videos uploaded here appear in the customer's portal.
+                          Customers can download them. Files are automatically removed 4 weeks after upload.
+                        </p>
+
+                        {/* Upload button */}
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept={ACCEPTED}
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file && uploadTarget) await handleUpload(uploadTarget, file);
+                            e.target.value = "";
+                          }}
+                        />
+                        <button
+                          type="button"
+                          disabled={!!uploading[job.id]}
+                          onClick={() => {
+                            setUploadTarget(job.id);
+                            setTimeout(() => fileInputRef.current?.click(), 50);
+                          }}
+                          className="inline-flex items-center gap-2 rounded-lg bg-brand-dark text-brand-cream text-xs font-semibold px-4 py-2 hover:bg-brand-dark/80 disabled:opacity-60 transition-colors"
+                        >
+                          {uploading[job.id] ? (
+                            <>
+                              <span className="h-3.5 w-3.5 rounded-full border-2 border-brand-cream/30 border-t-brand-cream animate-spin inline-block" />
+                              Uploading…
+                            </>
+                          ) : (
+                            <>📤 Upload Image / Video</>
+                          )}
+                        </button>
+
+                        {uploadMsg[job.id] && (
+                          <p className={[
+                            "text-xs mt-2 font-medium",
+                            (uploadMsg[job.id] ?? "").startsWith("Error") ? "text-red-600" : "text-green-700",
+                          ].join(" ")}>
+                            {uploadMsg[job.id]}
+                          </p>
+                        )}
+
+                        {/* Uploaded files list */}
+                        {artworkLoaded[job.id] && (artworkFiles[job.id] ?? []).length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {(artworkFiles[job.id] ?? []).map((f) => {
+                              const url = artworkUrls[job.id]?.[f.name];
+                              return (
+                                <div key={f.name} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-2.5">
+                                  {/* Thumbnail */}
+                                  <div className="w-12 h-12 rounded-md overflow-hidden bg-gray-100 shrink-0 flex items-center justify-center">
+                                    {isImage(f.name) && url ? (
+                                      <img src={url} alt={f.name} className="w-full h-full object-cover" />
+                                    ) : isVideo(f.name) ? (
+                                      <span className="text-2xl">🎬</span>
+                                    ) : (
+                                      <span className="text-2xl">📎</span>
+                                    )}
+                                  </div>
+                                  {/* Name + size */}
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium text-gray-800 truncate">{f.name}</p>
+                                    {f.metadata?.size && (
+                                      <p className="text-[10px] text-gray-400">{fmtBytes(f.metadata.size)}</p>
+                                    )}
+                                  </div>
+                                  {/* Delete */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteArtwork(job.id, f.name)}
+                                    className="text-red-400 hover:text-red-600 text-lg leading-none shrink-0"
+                                    title="Remove file"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {artworkLoaded[job.id] && (artworkFiles[job.id] ?? []).length === 0 && (
+                          <p className="mt-2 text-xs text-gray-400 italic">No files uploaded yet.</p>
                         )}
                       </div>
 
