@@ -16,6 +16,7 @@ import {
   INVOICE_TYPES, INVOICE_STATUSES, STATUS_COLORS,
 } from "../../lib/invoices.js";
 import { loadSavedQuotes } from "../../lib/quoteStorage.js";
+import { createJobFromInvoice } from "../../lib/jobs.js";
 import { formatGHS as GHS } from "../../lib/currency.js";
 
 const VAT_RATE = 0.20;
@@ -384,9 +385,39 @@ export default function InvoiceBuilder({
     }
   }
 
-  async function handleSave()      { await buildAndSave(); }
-  async function handleMarkSent()  { await buildAndSave("sent"); }
-  async function handleMarkPaid()  { await buildAndSave("paid"); }
+  async function handleSave()     { await buildAndSave(); }
+  async function handleMarkSent() { await buildAndSave("sent"); }
+
+  // Payment Received — saves the invoice AND creates/updates a job row so
+  // the job appears in the production, designer, and accounts lobbies.
+  async function handleMarkPaid() {
+    const ok = await buildAndSave("paid");
+    if (!ok) return;
+
+    // Job title = first non-empty line item name
+    const jobTitle = lineItems.find((li) => li.name.trim())?.name || "Print Job";
+
+    // If this invoice was imported from a print quote, carry the full snapshot
+    // so all spec details (pages, binding, etc.) are preserved in the job record.
+    const snap = selectedImportQuote ?? null;
+    const needsDesign = snap?.needsDesign || false;
+
+    try {
+      await createJobFromInvoice(user?.id, {
+        ref,
+        clientName,
+        clientPhone,
+        jobTitle,
+        total,
+        needsDesign,
+        quoteSnapshot: snap,
+      });
+    } catch (err) {
+      // Non-fatal — invoice is already saved. Log so it's visible in devtools
+      // but don't show an error to the user.
+      console.warn("Job record not created:", err?.message ?? err);
+    }
+  }
 
   // ── Send via Email — print first, then open mailto
   function handleSendEmail() {

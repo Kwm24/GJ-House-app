@@ -211,6 +211,63 @@ export async function assignCustomerToJob(jobId, customerUserId) {
   return data;
 }
 
+// Create a job from invoice data when CS marks an invoice as paid.
+// If a job already exists for this ref, just update its status to "approved".
+// Non-fatal on duplicate — the invoice save already succeeded.
+export async function createJobFromInvoice(userId, {
+  ref, clientName, clientPhone, jobTitle, total, needsDesign, quoteSnapshot,
+}) {
+  // Check for an existing job with the same ref to avoid duplicates
+  const { data: existing } = await supabase
+    .from("jobs")
+    .select("id")
+    .eq("quote_ref", ref)
+    .maybeSingle();
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .update({ status: "approved" })
+      .eq("id", existing.id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  const depositAmount = Math.round(Number(total || 0) * 0.6 * 100) / 100;
+
+  // Use the full print-quote snapshot as the job's quote JSONB if available,
+  // otherwise build a minimal stand-in so the spec sheet still renders.
+  const snapshot = quoteSnapshot ?? {
+    ref,
+    clientName: clientName || "",
+    clientPhone: clientPhone || null,
+    jobTitle: jobTitle || "Print Job",
+    resultQtys: [],
+    results: {},
+  };
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .insert({
+      user_id:        userId,
+      quote_ref:      ref,
+      client_name:    clientName  || "",
+      client_phone:   clientPhone || null,
+      job_title:      jobTitle    || "Print Job",
+      status:         "approved",
+      deposit_amount: depositAmount,
+      needs_design:   needsDesign || false,
+      quote:          snapshot,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 // Every job — for CS lobby's Jobs tab (CS can see all regardless of status).
 export async function listAllJobsForCS() {
   const { data, error } = await supabase
