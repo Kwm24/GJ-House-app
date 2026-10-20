@@ -4,7 +4,7 @@ import { supabase } from "./supabase.js";
 // Jobs include their per-job payments sub-array so actual cash-received can
 // be summed per job without a separate N+1 query.
 export async function getDashboardData() {
-  const [jobsRes, expRes, profilesRes, paymentsRes] = await Promise.all([
+  const [jobsRes, expRes, profilesRes, paymentsRes, customersRes] = await Promise.all([
     supabase
       .from("jobs")
       .select("id, status, quote, deposit_amount, created_at, job_title, client_name, payments(id, amount, type)")
@@ -17,17 +17,25 @@ export async function getDashboardData() {
       .select("id, amount, type, method, date, job_id, jobs(job_title, client_name, quote_ref)")
       .order("date", { ascending: false })
       .limit(10),
+    // Registered customer accounts newest-first
+    supabase
+      .from("profiles")
+      .select("user_id, full_name, phone, email, created_at")
+      .eq("role", "customer")
+      .order("created_at", { ascending: false }),
   ]);
 
   if (jobsRes.error) throw jobsRes.error;
   if (expRes.error) throw expRes.error;
   if (profilesRes.error) throw profilesRes.error;
   if (paymentsRes.error) throw paymentsRes.error;
+  if (customersRes.error) throw customersRes.error;
 
   return {
     jobs: jobsRes.data ?? [],
     expenditures: expRes.data ?? [],
     profiles: profilesRes.data ?? [],
     payments: paymentsRes.data ?? [],
+    customers: customersRes.data ?? [],
   };
 }

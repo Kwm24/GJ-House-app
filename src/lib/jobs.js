@@ -1,6 +1,10 @@
 import { supabase } from "./supabase.js";
 
 function quoteGrandTotal(quoteSnapshot) {
+  // Digital quotes store the total directly in result.sellPrice
+  if (quoteSnapshot?.quoteType === "digital") {
+    return quoteSnapshot?.result?.sellPrice ?? 0;
+  }
   const primaryQty = quoteSnapshot?.resultQtys?.[0];
   return quoteSnapshot?.results?.[primaryQty]?.grandTotal ?? 0;
 }
@@ -216,6 +220,7 @@ export async function assignCustomerToJob(jobId, customerUserId) {
 // Non-fatal on duplicate — the invoice save already succeeded.
 export async function createJobFromInvoice(userId, {
   ref, clientName, clientPhone, jobTitle, total, needsDesign, quoteSnapshot,
+  customerId,   // optional: links the job to a registered customer account
 }) {
   // Check for an existing job with the same ref to avoid duplicates
   const { data: existing } = await supabase
@@ -225,9 +230,12 @@ export async function createJobFromInvoice(userId, {
     .maybeSingle();
 
   if (existing) {
+    const patch = { status: needsDesign ? "ready_for_design" : "approved" };
+    // Carry the customer link across if we now know who the customer is
+    if (customerId) patch.customer_id = customerId;
     const { data, error } = await supabase
       .from("jobs")
-      .update({ status: "approved" })
+      .update(patch)
       .eq("id", existing.id)
       .select()
       .single();
@@ -256,10 +264,11 @@ export async function createJobFromInvoice(userId, {
       client_name:    clientName  || "",
       client_phone:   clientPhone || null,
       job_title:      jobTitle    || "Print Job",
-      status:         "approved",
+      status:         needsDesign ? "ready_for_design" : "approved",
       deposit_amount: depositAmount,
       needs_design:   needsDesign || false,
       quote:          snapshot,
+      customer_id:    customerId  || null,
     })
     .select()
     .single();
@@ -286,6 +295,29 @@ export async function listCustomerJobs() {
     .select("*")
     .order("created_at", { ascending: false });
 
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Save internal staff notes on a job (visible only to staff, not customers).
+export async function updateJobNotes(jobId, notes) {
+  const { data, error } = await supabase
+    .from("jobs")
+    .update({ notes: notes?.trim() || null })
+    .eq("id", jobId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// All jobs for a specific customer — used by CS/admin staff when viewing a customer profile.
+export async function listJobsByCustomer(customerId) {
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("id, job_title, quote_ref, status, deposit_amount, quote, created_at, payments(amount)")
+    .eq("customer_id", customerId)
+    .order("created_at", { ascending: false });
   if (error) throw error;
   return data ?? [];
 }
@@ -338,5 +370,83 @@ export async function deleteJobFinal(jobId, fileName) {
     .from("job-finals")
     .remove([`${jobId}/${fileName}`]);
 
+  if (error) throw error;
+}
+
+// Assign (or clear) a designer to a job so it appears in their "My Jobs" tab.
+// Pass null to unassign. Called by admin from the designer lobby's Jobs tab.
+export async function assignDesigner(jobId, designerUserId) {
+  const { data, error } = await supabase
+    .from("jobs")
+    .update({ assigned_designer_id: designerUserId || null })
+    .eq("id", jobId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Jobs assigned to the currently signed-in designer.
+// Only returns jobs where assigned_designer_id matches the logged-in user.
+export async function listMyDesignJobs() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("*")
+    .eq("assigned_designer_id", user.id)
+    .order("deadline", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Assign (or clear) a producer to a job so it appears in their "My Jobs" tab.
+// Pass null to unassign. Called by admin from the production lobby's Jobs tab.
+export async function assignProducer(jobId, producerUserId) {
+  const { data, error } = await supabase
+    .from("jobs")
+    .update({ assigned_producer_id: producerUserId || null })
+    .eq("id", jobId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Jobs assigned to the currently signed-in producer.
+// Only returns jobs where assigned_producer_id matches the logged-in user.
+export async function listMyProductionJobs() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("*")
+    .eq("assigned_producer_id", user.id)
+    .order("deadline", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Permanently deletes a job row. Admin-only (enforced by RLS).
+// Payments/expenditures survive with job_id set null; job_files cascade-delete.
+export async function deleteJob(jobId) {
+  const { error } = await supabase
+    .from("jobs")
+    .delete()
+    .eq("id", jobId);
+  if (error) throw error;
+}
+
+// Customer approves the designer's artwork — sets design_approved=true and
+// moves the job to design_ready, giving production the green light.
+// Uses a SECURITY DEFINER RPC so customers don't need a broad UPDATE policy.
+export async function approveDesign(jobId) {
+  const { error } = await supabase.rpc("approve_job_design", { p_job_id: jobId });
   if (error) throw error;
 }

@@ -6,9 +6,10 @@ import { ResourcesTab } from "./ResourcesTab.jsx";
 import { DesignUploadTab } from "./DesignUploadTab.jsx";
 
 const TABS = [
-  { id: "spec", label: "Spec Sheet" },
-  { id: "resources", label: "Resources" },
-  { id: "upload", label: "Design Upload" },
+  { id: "spec",      label: "Spec Sheet"    },
+  { id: "resources", label: "Resources"     },
+  { id: "upload",    label: "Design Upload" },
+  { id: "notes",     label: "Notes"         },
 ];
 
 export function JobDetail({ jobId, onBack }) {
@@ -38,7 +39,7 @@ export function JobDetail({ jobId, onBack }) {
     return (
       <div className="flex items-center justify-center py-16">
         <div
-          className="h-8 w-8 rounded-full border-2 border-brand-cream/30 border-t-brand-red animate-spin"
+          className="h-8 w-8 rounded-full border-2 border-[var(--t-border)] border-t-brand-red animate-spin"
           aria-label="Loading"
         />
       </div>
@@ -51,7 +52,7 @@ export function JobDetail({ jobId, onBack }) {
         <button
           type="button"
           onClick={onBack}
-          className="text-sm font-medium text-brand-cream/70 hover:text-brand-cream transition-colors"
+          className="text-sm font-medium text-[var(--t-muted)] hover:text-[var(--t-text1)] transition-colors"
         >
           ← Back to jobs
         </button>
@@ -67,7 +68,7 @@ export function JobDetail({ jobId, onBack }) {
       <button
         type="button"
         onClick={onBack}
-        className="text-sm font-medium text-brand-cream/70 hover:text-brand-cream transition-colors"
+        className="text-sm font-medium text-[var(--t-muted)] hover:text-[var(--t-text1)] transition-colors"
       >
         ← Back to jobs
       </button>
@@ -79,13 +80,13 @@ export function JobDetail({ jobId, onBack }) {
       )}
 
       {/* ── Header ── */}
-      <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
+      <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-lg sm:text-xl font-semibold text-brand-dark truncate">
+            <h2 className="text-lg sm:text-xl font-semibold text-[var(--t-text1)] truncate">
               {job.job_title || "Untitled job"}
             </h2>
-            <p className="mt-1 text-sm text-gray-600">
+            <p className="mt-1 text-sm text-[var(--t-text2)]">
               {job.client_name || "No client"} · Ref:{" "}
               <span className="font-mono">{job.quote_ref}</span>
             </p>
@@ -105,7 +106,7 @@ export function JobDetail({ jobId, onBack }) {
 
       {/* ── Tabs ── */}
       <div>
-        <div className="flex gap-1 overflow-x-auto scrollbar-none border-b border-white/10">
+        <div className="flex gap-1 overflow-x-auto scrollbar-none border-b border-[var(--t-border)]">
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -114,8 +115,8 @@ export function JobDetail({ jobId, onBack }) {
               className={[
                 "shrink-0 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
                 activeTab === tab.id
-                  ? "border-brand-red text-brand-cream"
-                  : "border-transparent text-brand-cream/50 hover:text-brand-cream/80",
+                  ? "border-brand-red text-[var(--t-text1)]"
+                  : "border-transparent text-[var(--t-muted)] hover:text-[var(--t-text2)]",
               ].join(" ")}
             >
               {tab.label}
@@ -124,15 +125,29 @@ export function JobDetail({ jobId, onBack }) {
         </div>
 
         <div className="mt-4">
-          {activeTab === "spec" && <SpecSheet job={job} />}
+          {activeTab === "spec" && <SpecSheet job={job} variant="designer" />}
           {activeTab === "resources" && (
-            <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
+            <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
               <ResourcesTab jobId={job.id} />
             </div>
           )}
           {activeTab === "upload" && (
-            <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
+            <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
               <DesignUploadTab job={job} onStatusChange={setJob} />
+            </div>
+          )}
+          {activeTab === "notes" && (
+            <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-brand-red mb-3">
+                Internal Notes
+              </p>
+              {job.notes ? (
+                <p className="text-sm text-[var(--t-text1)] whitespace-pre-wrap leading-relaxed">
+                  {job.notes}
+                </p>
+              ) : (
+                <p className="text-sm text-[var(--t-muted)] italic">No notes added for this job.</p>
+              )}
             </div>
           )}
         </div>

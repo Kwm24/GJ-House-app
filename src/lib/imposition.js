@@ -59,9 +59,9 @@ export const PRINT_ORIENTATIONS = {
 export function resolveSheetDims(sheet, sheetOrientation = "portrait") {
   if (!sheet) return null;
   if (sheetOrientation === "landscape") {
-    return { w: sheet.h, h: sheet.w, label: sheet.label };
+    return { ...sheet, w: sheet.h, h: sheet.w };
   }
-  return { w: sheet.w, h: sheet.h, label: sheet.label };
+  return { ...sheet };
 }
 
 // ─── CORE FIT CALCULATION ────────────────────────────────────────────────────
@@ -114,8 +114,11 @@ export function evaluateSheetOption({
   const fit = fitOnSheet(bookW, bookH, effSheet.w, effSheet.h, DEFAULT_LAYOUT_SETTINGS, orientation);
   if (!fit) return null;
 
-  const forms       = Math.ceil(numPages / fit.pagesPerSheet);
-  const numPlates   = forms * 2 * Number(colours);
+  // sidesNeeded = distinct plate-face exposures (one per content side).
+  // The last form may only need printing on one side if pages don't fill both.
+  const sidesNeeded = Math.ceil(numPages / fit.pagesPerSide);
+  const forms       = Math.ceil(numPages / fit.pagesPerSheet); // = ceil(sidesNeeded/2)
+  const numPlates   = sidesNeeded * Number(colours);
 
   const totalSheets = forms * qty;
   const withWastage = Math.ceil(totalSheets * 1.05);
@@ -142,6 +145,7 @@ export function evaluateSheetOption({
     sheetOrientation,
     ...fit,
     forms,
+    sidesNeeded,
     numPlates,
     totalSheets,
     withWastage,

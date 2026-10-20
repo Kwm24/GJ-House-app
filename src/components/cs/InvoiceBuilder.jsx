@@ -15,9 +15,12 @@ import {
   saveInvoice, genInvoiceRef,
   INVOICE_TYPES, INVOICE_STATUSES, STATUS_COLORS,
 } from "../../lib/invoices.js";
-import { loadSavedQuotes } from "../../lib/quoteStorage.js";
-import { createJobFromInvoice } from "../../lib/jobs.js";
+import { loadSavedQuotes, loadDigitalQuotes } from "../../lib/quoteStorage.js";
+import { buildDigitalSpecSummary } from "../DigitalPrintQuoteGH.jsx";
+// Note: createJobFromInvoice is now called by Accounts (PaymentsTab) when they
+// record payment — CS no longer marks invoices as paid directly.
 import { formatGHS as GHS } from "../../lib/currency.js";
+import { CustomerPicker } from "../CustomerPicker.jsx";
 
 const VAT_RATE = 0.20;
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -87,6 +90,26 @@ function buildPrintHtml(state, company) {
          </p>`
       : "";
 
+  const hasPaymentInfo = company.momoNumber || company.bankName || company.accountNumber;
+  const howToPayHtml = (state.docType !== "receipt" && hasPaymentInfo)
+    ? `<div style="margin-top:28px;border:1.5px solid ${accent};border-radius:8px;overflow:hidden">
+         <div style="background:${accent};color:#fff;padding:8px 16px;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase">
+           How to Pay
+         </div>
+         <div style="padding:14px 16px;display:flex;flex-wrap:wrap;gap:16px 32px;font-size:11px">
+           ${company.momoNumber ? `<div>
+             <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#888;margin-bottom:3px">Mobile Money (MoMo)</div>
+             <div style="font-weight:600">${company.momoNumber}</div>
+           </div>` : ""}
+           ${company.bankName || company.accountNumber ? `<div>
+             <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#888;margin-bottom:3px">Bank Transfer</div>
+             ${company.bankName ? `<div style="font-weight:600">${company.bankName}</div>` : ""}
+             ${company.accountNumber ? `<div>${company.accountNumber}${company.accountName ? ` &mdash; ${company.accountName}` : ""}</div>` : ""}
+           </div>` : ""}
+         </div>
+       </div>`
+    : "";
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -106,7 +129,7 @@ function buildPrintHtml(state, company) {
     .bill-name { font-size:14px; font-weight:700; }
     .bill-sub { font-size:11px; color:#666; margin-top:2px; }
     table { width:100%; border-collapse:collapse; margin-bottom:24px; }
-    thead tr { background:#1C1C1E; color:#fff; }
+    thead tr { background:${accent}; color:#fff; }
     thead th { padding:10px 12px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; text-align:left; }
     thead th.right { text-align:right; }
     thead th.center { text-align:center; }
@@ -172,8 +195,10 @@ function buildPrintHtml(state, company) {
 
   ${depositRow}
 
+  ${howToPayHtml}
+
   ${state.notes ? `
-  <div class="notes">
+  <div class="notes" style="margin-top:28px">
     <div class="notes-label">Notes / Terms</div>
     <div class="notes-text">${state.notes}</div>
   </div>` : ""}
@@ -234,13 +259,28 @@ export default function InvoiceBuilder({
   const [notes,       setNotes]       = useState(initial?.notes ?? "");
   const [saving,      setSaving]      = useState(false);
   const [error,       setError]       = useState("");
+  // Set when CS uses CustomerPicker — carried into invoices.customer_id so the
+  // document appears in that customer's portal Documents tab.
+  const [linkedCustomerId, setLinkedCustomerId] = useState(initial?.customer_id ?? null);
 
-  // ── Print-quote import
+  // Full PrintQuoteGH snapshot — preserved when CS imports from a saved quote so
+  // that the Production/Designer SpecSheet still has all the print figures even
+  // after the job is created from this invoice rather than directly from the quote.
+  const [importedQuoteSnapshot, setImportedQuoteSnapshot] = useState(
+    initial?.quote_snapshot ?? null
+  );
+
+  // ── Print-quote import (offset)
   const [savedPrintQuotes, setSavedPrintQuotes] = useState([]);
   const [importQuoteRef,   setImportQuoteRef]   = useState("");
 
+  // ── Digital quote import
+  const [savedDigitalQuotes,  setSavedDigitalQuotes]  = useState([]);
+  const [importDigitalRef,    setImportDigitalRef]    = useState("");
+
   useEffect(() => {
     try { setSavedPrintQuotes(loadSavedQuotes()); } catch {}
+    try { setSavedDigitalQuotes(loadDigitalQuotes()); } catch {}
   }, []);
 
   const selectedImportQuote = useMemo(
@@ -297,8 +337,44 @@ export default function InvoiceBuilder({
       return prev.trim() ? `${base}\n${prev.trim()}` : base;
     });
 
+    // Preserve the full snapshot so it can be saved on the invoice and later
+    // used by createJobFromInvoice to populate the Production/Designer SpecSheet.
+    setImportedQuoteSnapshot(snap);
+
     // Keep the picker on this quote so the user can see what was applied;
     // they can change the quantity again or pick a different quote.
+  }
+
+  function applyDigitalQuoteImport(snap) {
+    if (!snap) return;
+    const res         = snap.result ?? {};
+    const specSummary = res.description || buildDigitalSpecSummary(snap);
+    const qty         = Number(res.qty) || 1;
+    const sellPrice   = Number(res.sellPrice) || 0;
+    const unitPrice   = qty > 0 ? round2(sellPrice / qty) : sellPrice;
+
+    setClientName(snap.clientName   || "");
+    setClientPhone(snap.clientPhone || "");
+    setClientEmail(snap.clientEmail || "");
+
+    setLineItems([{
+      _key:        crypto.randomUUID(),
+      itemId:      "",
+      name:        snap.jobTitle || "Digital Print",
+      description: specSummary,
+      unit:        "copy",
+      qty,
+      unitPrice,
+    }]);
+
+    setApplyVAT(false);
+
+    setNotes((prev) => {
+      const base = `Based on digital quote ${snap.ref}`;
+      return prev.trim() ? `${base}\n${prev.trim()}` : base;
+    });
+
+    setImportedQuoteSnapshot(snap);
   }
 
   // ── Type change → new ref (unless editing existing record)
@@ -321,11 +397,14 @@ export default function InvoiceBuilder({
     const found = catalogueItems.find((i) => i.name === val);
     if (found) {
       updateLine(key, {
-        itemId: found.id,
-        name: found.name,
+        itemId:     found.id,
+        name:       found.name,
         description: found.description || "",
-        unit: found.unit,
-        unitPrice: Number(found.unit_price),
+        unit:       found.unit,
+        unitPrice:  Number(found.unit_price),
+        category:   found.category  || null,
+        itemType:   found.item_type || null,
+        printSpecs: found.item_type === "print" ? (found.print_specs || null) : null,
       });
     } else {
       updateLine(key, { itemId: "", name: val });
@@ -369,9 +448,16 @@ export default function InvoiceBuilder({
           qty:         Number(li.qty),
           unitPrice:   Number(li.unitPrice),
           total:       round2(Number(li.qty) * Number(li.unitPrice)),
+          ...(li.category   ? { category:   li.category   } : {}),
+          ...(li.printSpecs ? { printSpecs: li.printSpecs } : {}),
         })),
         subtotal, discount_pct: discountPct, discount_amt: discountAmt,
         vat_amt: vatAmt, total, notes: notes || null,
+        customer_id:      linkedCustomerId       || null,
+        // Full PrintQuoteGH snapshot — only present when CS imported from a saved
+        // quote. Preserved so that the SpecSheet can render in Production/Designer
+        // even when the job is created later via the Accounts payment flow.
+        quote_snapshot:   importedQuoteSnapshot  || null,
       };
       const result = await saveInvoice(payload, isEdit ? initial.id : null);
       if (overrideStatus) setDocStatus(overrideStatus);
@@ -387,37 +473,9 @@ export default function InvoiceBuilder({
 
   async function handleSave()     { await buildAndSave(); }
   async function handleMarkSent() { await buildAndSave("sent"); }
-
-  // Payment Received — saves the invoice AND creates/updates a job row so
-  // the job appears in the production, designer, and accounts lobbies.
-  async function handleMarkPaid() {
-    const ok = await buildAndSave("paid");
-    if (!ok) return;
-
-    // Job title = first non-empty line item name
-    const jobTitle = lineItems.find((li) => li.name.trim())?.name || "Print Job";
-
-    // If this invoice was imported from a print quote, carry the full snapshot
-    // so all spec details (pages, binding, etc.) are preserved in the job record.
-    const snap = selectedImportQuote ?? null;
-    const needsDesign = snap?.needsDesign || false;
-
-    try {
-      await createJobFromInvoice(user?.id, {
-        ref,
-        clientName,
-        clientPhone,
-        jobTitle,
-        total,
-        needsDesign,
-        quoteSnapshot: snap,
-      });
-    } catch (err) {
-      // Non-fatal — invoice is already saved. Log so it's visible in devtools
-      // but don't show an error to the user.
-      console.warn("Job record not created:", err?.message ?? err);
-    }
-  }
+  // Payment recording has moved to Accounts → PaymentsTab.
+  // When Accounts records payment against this invoice, a job is created
+  // automatically and a receipt appears in the customer's portal.
 
   // ── Send via Email — print first, then open mailto
   function handleSendEmail() {
@@ -504,7 +562,7 @@ export default function InvoiceBuilder({
 
       {/* Back */}
       <button type="button" onClick={onCancel}
-        className="text-sm font-medium text-brand-cream/70 hover:text-brand-cream transition-colors mb-6 block">
+        className="text-sm font-medium text-[var(--t-muted)] hover:text-[var(--t-text1)] transition-colors mb-6 block">
         ← Back to invoices
       </button>
 
@@ -593,6 +651,51 @@ export default function InvoiceBuilder({
         )}
       </div>
 
+      {/* ── 00b — Import from digital print quote ── */}
+      <div className="rounded-xl border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/10 dark:border-indigo-700 p-4 sm:p-5 mb-4">
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <div className="text-xs font-semibold uppercase tracking-widest text-indigo-700 dark:text-indigo-400">
+            Import from saved digital quote
+          </div>
+          <span className="text-[10px] font-medium text-indigo-500 bg-indigo-100 dark:bg-indigo-900/30 rounded px-2 py-0.5 shrink-0">optional</span>
+        </div>
+
+        {savedDigitalQuotes.length === 0 ? (
+          <p className="text-xs text-indigo-700/70 dark:text-indigo-400 leading-relaxed">
+            No saved digital quotes found. Go to <strong>Print Quotes → Digital Print</strong>, build a
+            quote and click <strong>💾 Save quote</strong> — it will then appear here.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-indigo-600 dark:text-indigo-400 mb-3">
+              Select a digital quote — fields fill in automatically with the client price.
+            </p>
+            <div className="flex-1 min-w-[220px]">
+              <label className="block text-xs font-medium text-indigo-700 dark:text-indigo-400 mb-1.5">
+                Select digital quote
+              </label>
+              <select
+                className="w-full rounded-lg border border-indigo-300 bg-white dark:bg-[var(--t-bg)] dark:border-indigo-600 px-3 py-2 text-sm text-gray-900 dark:text-[var(--t-text1)] focus:outline-none focus:ring-2 focus:ring-indigo-400/40 focus:border-indigo-500"
+                value={importDigitalRef}
+                onChange={(e) => {
+                  const ref = e.target.value;
+                  setImportDigitalRef(ref);
+                  const snap = savedDigitalQuotes.find((q) => q.ref === ref);
+                  if (snap) applyDigitalQuoteImport(snap);
+                }}
+              >
+                <option value="">— choose a saved digital quote —</option>
+                {savedDigitalQuotes.map((q) => (
+                  <option key={q.ref} value={q.ref}>
+                    {q.ref} · {q.jobTitle || "Untitled"} · {q.clientName || "No client"} · {GHS(q.result?.sellPrice ?? 0)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+      </div>
+
       {/* ── 01 Document type + meta ── */}
       <div className="rounded-xl bg-brand-cream p-5 sm:p-6 mb-4">
         <div className="text-xs font-semibold uppercase tracking-widest text-brand-red mb-4">
@@ -646,8 +749,18 @@ export default function InvoiceBuilder({
 
       {/* ── 02 Client ── */}
       <div className="rounded-xl bg-brand-cream p-5 sm:p-6 mb-4">
-        <div className="text-xs font-semibold uppercase tracking-widest text-brand-red mb-4">
-          02 — Client information
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-xs font-semibold uppercase tracking-widest text-brand-red">
+            02 — Client information
+          </div>
+          <CustomerPicker
+            onSelect={({ name, phone, email, userId }) => {
+              setClientName(name);
+              setClientPhone(phone);
+              if (email) setClientEmail(email);
+              setLinkedCustomerId(userId ?? null);
+            }}
+          />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
@@ -859,28 +972,28 @@ export default function InvoiceBuilder({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-brand-cream hover:bg-white/20 transition-colors"
+          className="rounded-lg border border-[var(--t-border)] bg-[var(--t-surface)] px-4 py-2.5 text-sm font-medium text-[var(--t-text2)] hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
         >
           Cancel
         </button>
         <button
           type="button"
           onClick={handlePrint}
-          className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-brand-cream hover:bg-white/20 transition-colors"
+          className="rounded-lg border border-[var(--t-border)] bg-[var(--t-surface)] px-4 py-2.5 text-sm font-medium text-[var(--t-text2)] hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
         >
           🖨 Print / PDF
         </button>
         <button
           type="button"
           onClick={handleSendEmail}
-          className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-brand-cream hover:bg-white/20 transition-colors"
+          className="rounded-lg border border-[var(--t-border)] bg-[var(--t-surface)] px-4 py-2.5 text-sm font-medium text-[var(--t-text2)] hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
         >
           ✉ Email
         </button>
         <button
           type="button"
           onClick={handleSendWhatsApp}
-          className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-brand-cream hover:bg-white/20 transition-colors"
+          className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-2.5 text-sm font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors"
         >
           💬 WhatsApp
         </button>
@@ -892,21 +1005,14 @@ export default function InvoiceBuilder({
             type="button"
             disabled={saving}
             onClick={handleMarkSent}
-            className="rounded-lg border border-amber-400/60 bg-amber-500/20 px-4 py-2.5 text-sm font-semibold text-amber-200 hover:bg-amber-500/30 disabled:opacity-60 transition-colors"
+            className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5 text-sm font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 disabled:opacity-60 transition-colors"
           >
             📤 Mark as Sent
           </button>
         )}
-        {docStatus !== "paid" && (
-          <button
-            type="button"
-            disabled={saving}
-            onClick={handleMarkPaid}
-            className="rounded-lg border border-green-400/60 bg-green-500/20 px-4 py-2.5 text-sm font-semibold text-green-200 hover:bg-green-500/30 disabled:opacity-60 transition-colors"
-          >
-            ✓ Payment Received
-          </button>
-        )}
+        {/* Payment recording is handled by Accounts → Payments tab.
+            They select this invoice, record the payment, and the system
+            creates the job and posts a receipt to the customer's portal. */}
         <button
           type="button"
           disabled={saving}

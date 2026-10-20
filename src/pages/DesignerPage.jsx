@@ -1,50 +1,77 @@
 import { useState } from "react";
 import { LobbyHeader } from "../components/LobbyHeader.jsx";
+import { useAuth } from "../components/AuthProvider.jsx";
 import { DesignerJobsTab } from "../components/designer/DesignerJobsTab.jsx";
+import { MyDesignJobsTab } from "../components/designer/MyDesignJobsTab.jsx";
 import { DesignHistoryTab } from "../components/designer/DesignHistoryTab.jsx";
-
-const TABS = [
-  { id: "jobs", label: "Jobs" },
-  { id: "history", label: "Design History" },
-];
+import { LayoutGrid, Pen, Clock } from "lucide-react";
 
 export function DesignerPage() {
-  const [activeTab, setActiveTab] = useState("jobs");
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
+
+  const TABS = isAdmin
+    ? [
+        { id: "jobs",    label: "All Design Jobs", Icon: LayoutGrid },
+        { id: "history", label: "Design History",  Icon: Clock      },
+      ]
+    : [
+        { id: "myjobs",  label: "My Jobs",         Icon: Pen        },
+        { id: "history", label: "Design History",  Icon: Clock      },
+      ];
+
+  const [activeTab,  setActiveTab]  = useState(isAdmin ? "jobs" : "myjobs");
+  const [focusJobId, setFocusJobId] = useState(null);
+
+  function handleNavigateToJob(jobId) {
+    setActiveTab(isAdmin ? "jobs" : "myjobs");
+    setFocusJobId(jobId);
+  }
 
   return (
-    <div className="min-h-screen bg-brand-dark">
+    <div className="min-h-screen" style={{ background: "var(--t-bg)" }}>
       <LobbyHeader
         title="Design Studio"
-        subtitle="Artwork, proofs & pre-press files"
+        subtitle={
+          isAdmin
+            ? "Assign jobs to designers and review all design work"
+            : "Artwork, proofs & pre-press files"
+        }
+        onNavigateToJob={handleNavigateToJob}
       />
 
-      <nav
-        className="border-b border-white/10 bg-brand-dark/95 backdrop-blur-sm sticky top-[var(--lobby-header-offset,0)] z-10"
-        aria-label="Designer sections"
+      <div
+        className="sticky top-14 z-10 border-b backdrop-blur-sm px-4 sm:px-6 py-3"
+        style={{ background: "var(--t-nav-bg)", borderColor: "var(--t-border)" }}
       >
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="flex gap-1 sm:gap-2 -mb-px overflow-x-auto scrollbar-none">
-            {TABS.map((tab) => (
+        <div className="mx-auto max-w-6xl">
+          <nav
+            className="flex items-center gap-1 p-1 bg-[var(--t-surface)] border border-[var(--t-border)] rounded-xl overflow-x-auto scrollbar-none"
+            aria-label="Designer sections"
+          >
+            {TABS.map(({ id, label, Icon }) => (
               <button
-                key={tab.id}
+                key={id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => setActiveTab(id)}
                 className={[
-                  "shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                  activeTab === tab.id
-                    ? "border-brand-red text-brand-cream"
-                    : "border-transparent text-brand-cream/50 hover:text-brand-cream/80",
+                  "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/40",
+                  activeTab === id
+                    ? "bg-brand-red text-white shadow-sm"
+                    : "text-[var(--t-text2)] hover:bg-gray-100 dark:hover:bg-white/5",
                 ].join(" ")}
               >
-                {tab.label}
+                <Icon size={14} />
+                {label}
               </button>
             ))}
-          </div>
+          </nav>
         </div>
-      </nav>
+      </div>
 
-      <div className="min-h-[calc(100vh-8rem)]">
-        {activeTab === "jobs" && <DesignerJobsTab />}
+      <div className="min-h-[calc(100vh-8rem)] animate-fade-in">
+        {activeTab === "jobs"    && <DesignerJobsTab />}
+        {activeTab === "myjobs"  && <MyDesignJobsTab focusJobId={focusJobId} />}
         {activeTab === "history" && <DesignHistoryTab />}
       </div>
     </div>

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Search } from "lucide-react";
 import {
   listInvoices, deleteInvoice, genInvoiceRef,
   INVOICE_TYPES, STATUS_COLORS, TYPE_COLORS,
@@ -7,17 +8,19 @@ import { listItems } from "../../lib/items.js";
 import { getSettings } from "../../lib/settings.js";
 import { formatGHS as GHS } from "../../lib/currency.js";
 import InvoiceBuilder from "./InvoiceBuilder.jsx";
+import { PeriodPicker, filterByPeriod, defaultPeriod } from "../PeriodPicker.jsx";
 
 const DEFAULT_COMPANY = {
   name: "YOUR PRESS NAME", address: "Street Address, Accra, Ghana",
   phone: "+233 XX XXX XXXX", email: "email@yourpress.com", vatNo: "",
   logoUrl: "", accentHex: "#C0392B",
+  momoNumber: "", bankName: "", accountNumber: "", accountName: "",
 };
 
 const TYPE_LABELS = Object.fromEntries(INVOICE_TYPES.map((t) => [t.value, t.label]));
 
-export function InvoicesTab() {
-  const [mode,       setMode]       = useState("list"); // "list" | "create" | "edit" | "convert"
+export function InvoicesTab({ focusInvoiceId, onFocusConsumed }) {
+  const [mode,       setMode]       = useState("list");
   const [editTarget, setEditTarget] = useState(null);
 
   const [invoices,   setInvoices]   = useState([]);
@@ -26,8 +29,13 @@ export function InvoicesTab() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState("");
 
-  // Filter
   const [typeFilter, setTypeFilter] = useState("all");
+  const [search,     setSearch]     = useState("");
+  const [period,     setPeriod]     = useState(defaultPeriod());
+
+  // Track whether we've already acted on the incoming focusInvoiceId so we
+  // don't re-open the same invoice on every re-render.
+  const handledFocusRef = useRef(null);
 
   const loadInvoices = useCallback(async () => {
     setLoading(true); setError("");
@@ -35,6 +43,18 @@ export function InvoicesTab() {
     catch (err) { setError(err.message ?? "Could not load invoices."); }
     finally { setLoading(false); }
   }, []);
+
+  // When a focusInvoiceId arrives (from customer profile navigation), open
+  // that invoice in edit mode as soon as the list is loaded.
+  useEffect(() => {
+    if (!focusInvoiceId || loading || handledFocusRef.current === focusInvoiceId) return;
+    const target = invoices.find((inv) => inv.id === focusInvoiceId);
+    if (!target) return;
+    handledFocusRef.current = focusInvoiceId;
+    setEditTarget(target);
+    setMode("edit");
+    onFocusConsumed?.();
+  }, [focusInvoiceId, invoices, loading, onFocusConsumed]);
 
   useEffect(() => {
     loadInvoices();
@@ -47,12 +67,16 @@ export function InvoicesTab() {
         email:     d.company_email   ?? DEFAULT_COMPANY.email,
         vatNo:     d.company_vat_no  ?? "",
         logoUrl:   d.company_logo_url ?? "",
-        accentHex: d.accent_color    ?? "#C0392B",
+        accentHex:     d.accent_color    ?? "#C0392B",
+        momoNumber:    d.momo_number     ?? "",
+        bankName:      d.bank_name       ?? "",
+        accountNumber: d.account_number  ?? "",
+        accountName:   d.account_name    ?? "",
       });
     }).catch(() => {});
   }, [loadInvoices]);
 
-  function handleSaved(result) {
+  function handleSaved() {
     loadInvoices();
     setMode("list");
     setEditTarget(null);
@@ -69,10 +93,9 @@ export function InvoicesTab() {
   }
 
   function handleConvert(inv) {
-    // Open builder pre-filled with the invoice data but as a new "invoice" type
     setEditTarget({
       ...inv,
-      id: null,           // new record
+      id: null,
       type: "invoice",
       status: "draft",
       ref: genInvoiceRef("invoice"),
@@ -80,7 +103,6 @@ export function InvoicesTab() {
     setMode("create");
   }
 
-  // ── Builder modes
   if (mode === "create" || mode === "edit") {
     return (
       <InvoiceBuilder
@@ -93,10 +115,15 @@ export function InvoicesTab() {
     );
   }
 
-  // ── List mode
-  const filtered = typeFilter === "all"
-    ? invoices
-    : invoices.filter((i) => i.type === typeFilter);
+  const q = search.toLowerCase().trim();
+  const filtered = filterByPeriod(invoices, period)
+    .filter((i) => typeFilter === "all" || i.type === typeFilter)
+    .filter((i) => !q || (
+      (i.ref ?? "").toLowerCase().includes(q) ||
+      (i.client_name ?? "").toLowerCase().includes(q) ||
+      (i.status ?? "").toLowerCase().includes(q) ||
+      (TYPE_LABELS[i.type] ?? "").toLowerCase().includes(q)
+    ));
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
@@ -109,8 +136,8 @@ export function InvoicesTab() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h2 className="text-lg sm:text-xl font-semibold text-brand-cream">Invoices</h2>
-          <p className="mt-0.5 text-sm text-brand-cream/60">
+          <h2 className="text-lg sm:text-xl font-semibold text-[var(--t-text1)]">Invoices</h2>
+          <p className="mt-0.5 text-sm text-[var(--t-muted)]">
             Quotes, invoices, and receipts for all services.
           </p>
         </div>
@@ -123,9 +150,14 @@ export function InvoicesTab() {
         </button>
       </div>
 
-      <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
+      <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
+        {/* Period filter */}
+        <div className="mb-4">
+          <PeriodPicker period={period} onChange={setPeriod} accentColor="#C0392B" />
+        </div>
+
         {/* Type filter */}
-        <div className="flex gap-2 mb-5 flex-wrap">
+        <div className="flex gap-2 mb-4 flex-wrap">
           {[{ value: "all", label: "All" }, ...INVOICE_TYPES].map((t) => (
             <button
               key={t.value}
@@ -134,13 +166,25 @@ export function InvoicesTab() {
               className={[
                 "rounded-full px-4 py-1.5 text-xs font-semibold transition-colors",
                 typeFilter === t.value
-                  ? "bg-brand-dark text-white"
-                  : "bg-white border border-gray-300 text-gray-600 hover:border-brand-red/50",
+                  ? "bg-[var(--t-text1)] text-[var(--t-bg)]"
+                  : "bg-[var(--t-bg)] border border-[var(--t-border)] text-[var(--t-text2)] hover:border-brand-red/50",
               ].join(" ")}
             >
               {t.label}
             </button>
           ))}
+        </div>
+
+        {/* Search */}
+        <div className="relative mb-5">
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--t-muted)]" />
+          <input
+            type="text"
+            placeholder="Search by ref, client, status…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-[var(--t-border)] bg-[var(--t-bg)] pl-9 pr-4 py-2.5 text-sm text-[var(--t-text1)] placeholder:text-[var(--t-muted)] focus:outline-none focus:ring-2 focus:ring-brand-red/20 focus:border-brand-red transition-colors"
+          />
         </div>
 
         {loading ? (
@@ -149,16 +193,20 @@ export function InvoicesTab() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-gray-500 text-sm">No invoices yet.</p>
-            <p className="text-gray-400 text-xs mt-1">
-              Click "+ New Invoice" to create your first quote, invoice, or receipt.
+            <p className="text-[var(--t-muted)] text-sm">
+              {search || typeFilter !== "all" ? "No invoices match your search." : "No invoices yet."}
             </p>
+            {!search && typeFilter === "all" && (
+              <p className="text-[var(--t-muted)] text-xs mt-1">
+                Click "+ New Invoice" to create your first quote, invoice, or receipt.
+              </p>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b border-gray-300">
+                <tr className="text-left text-xs uppercase tracking-wide text-[var(--t-muted)] border-b border-[var(--t-border)]">
                   <th className="py-2 pr-4">Ref</th>
                   <th className="py-2 pr-4">Type</th>
                   <th className="py-2 pr-4">Status</th>
@@ -170,8 +218,8 @@ export function InvoicesTab() {
               </thead>
               <tbody>
                 {filtered.map((inv) => (
-                  <tr key={inv.id} className="border-b border-gray-200 hover:bg-white/60 transition-colors">
-                    <td className="py-2.5 pr-4 font-mono text-xs text-brand-dark font-medium">
+                  <tr key={inv.id} className="border-b border-[var(--t-border)] hover:bg-gray-50 dark:hover:bg-white/3 transition-colors">
+                    <td className="py-2.5 pr-4 font-mono text-xs text-[var(--t-text1)] font-medium">
                       {inv.ref}
                     </td>
                     <td className="py-2.5 pr-4">
@@ -184,9 +232,9 @@ export function InvoicesTab() {
                         {inv.status}
                       </span>
                     </td>
-                    <td className="py-2.5 pr-4 text-gray-700">{inv.client_name || "—"}</td>
-                    <td className="py-2.5 pr-4 text-gray-500 whitespace-nowrap">{inv.date}</td>
-                    <td className="py-2.5 pr-4 text-right font-semibold text-brand-dark whitespace-nowrap">
+                    <td className="py-2.5 pr-4 text-[var(--t-text2)]">{inv.client_name || "—"}</td>
+                    <td className="py-2.5 pr-4 text-[var(--t-muted)] whitespace-nowrap">{inv.date}</td>
+                    <td className="py-2.5 pr-4 text-right font-semibold text-[var(--t-text1)] whitespace-nowrap">
                       {GHS(inv.total)}
                     </td>
                     <td className="py-2.5 pr-4">

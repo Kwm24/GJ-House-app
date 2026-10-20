@@ -11,14 +11,80 @@
 :root {
   --c-accent: 192 57 43;   /* #C0392B */
   --br: #C0392B;
+
+  /* ── Light theme tokens (genesis) ── */
+  --t-bg:       #FAFAFA;
+  --t-surface:  #FFFFFF;
+  --t-text1:    #0A0A0A;
+  --t-text2:    #6B6B6B;
+  --t-muted:    #9C9C9C;
+  --t-border:   #E8E8EC;
+  --t-primary:  #6366F1;
+  --t-primary-h:#4F46E5;
+  --t-header-bg:rgba(255,255,255,0.95);
+  --t-nav-bg:   rgba(255,255,255,0.95);
+}
+
+/* ── Dark theme overrides ── */
+.dark {
+  --t-bg:       #111113;
+  --t-surface:  #1C1C1E;
+  --t-text1:    #F5F0E8;
+  --t-text2:    rgba(245,240,232,0.65);
+  --t-muted:    rgba(245,240,232,0.35);
+  --t-border:   rgba(255,255,255,0.10);
+  --t-primary:  var(--br, #C0392B);
+  --t-primary-h:var(--br, #C0392B);
+  --t-header-bg:rgba(28,28,30,0.95);
+  --t-nav-bg:   rgba(28,28,30,0.95);
 }
 
 @layer base {
   body {
     @apply m-0 min-h-screen antialiased;
+    background-color: var(--t-bg);
+    color: var(--t-text1);
+    font-family: "DM Sans", Inter, system-ui, sans-serif;
   }
 
   #root {
     @apply min-h-screen;
   }
+
+  /* Smooth theme transition */
+  *, *::before, *::after {
+    transition-property: background-color, border-color, color;
+    transition-duration: 150ms;
+    transition-timing-function: ease;
+  }
 }
+
+/* ── Genesis animation keyframes ───────────────────────────────────────────── */
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.animate-slide-down { animation: slideDown 180ms ease-out; }
+.animate-slide-up   { animation: slideUp  180ms ease-out; }
+.animate-fade-in    { animation: fadeIn   200ms ease-out; }
+.animate-scale-in   { animation: scaleIn  150ms ease-out; }
+
+/* Button states */
+.btn-loading { pointer-events: none; opacity: 0.7; cursor: wait; }
+
+/* Scrollbar hide utility */
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }

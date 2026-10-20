@@ -39,6 +39,7 @@ export default function ImpositionAdvisor({
   const [customOpen, setCustomOpen] = useState(value === "custom");
   const [customW, setCustomW] = useState(25);
   const [customH, setCustomH] = useState(38);
+  const [customBaseKey, setCustomBaseKey] = useState("standard");
 
   const options = useMemo(
     () => suggestBestParentSheet({ bookW, bookH, numPages, colours, qty, rates, bindingType, orientation, sheetOrientation, catalog }),
@@ -47,12 +48,36 @@ export default function ImpositionAdvisor({
 
   const customResult = useMemo(() => {
     if (!customOpen || !customW || !customH) return null;
-    return evaluateSheetOption({
+    const cW = Number(customW), cH = Number(customH);
+    const base = catalog[customBaseKey] || catalog.standard;
+    let sheetsPerBase = 1;
+    if (base && cW > 0 && cH > 0) {
+      const { w: bW, h: bH } = base;
+      sheetsPerBase = Math.max(1,
+        Math.floor(bW / cW) * Math.floor(bH / cH),
+        Math.floor(bW / cH) * Math.floor(bH / cW),
+      );
+    }
+    const result = evaluateSheetOption({
       key: "custom",
-      sheet: { w: Number(customW), h: Number(customH), label: `Custom (${customW}×${customH}")` },
+      sheet: { w: cW, h: cH, label: `Custom (${cW}×${cH}")` },
       bookW, bookH, numPages, colours, qty, rates, bindingType, orientation, sheetOrientation,
     });
-  }, [customOpen, customW, customH, bookW, bookH, numPages, colours, qty, rates, bindingType, orientation, sheetOrientation]);
+    if (!result) return null;
+    // Correct ream count for base-sheet multiplier (more parent sheets per ream)
+    const correctedReams    = Math.ceil(result.withWastage / (500 * sheetsPerBase));
+    const correctedPaperCost = correctedReams * (rates.paperRate || 0);
+    const correctedTotal    = result.plateCost + correctedPaperCost + result.impressionCost;
+    return {
+      ...result,
+      reamsNeeded: correctedReams,
+      paperCost:   correctedPaperCost,
+      totalCost:   correctedTotal,
+      costPerCopy: qty > 0 ? correctedTotal / qty : 0,
+      baseSheet:   base,
+      parentSheetsPerBaseSheet: sheetsPerBase,
+    };
+  }, [customOpen, customW, customH, customBaseKey, bookW, bookH, numPages, colours, qty, rates, bindingType, orientation, sheetOrientation, catalog]);
 
   if (!bookW || !bookH || !numPages) {
     return <p style={S.hint}>Enter book size and page count to see parent sheet suggestions.</p>;
@@ -152,9 +177,33 @@ export default function ImpositionAdvisor({
                 <input type="number" step="0.1" value={customW} onChange={(e) => setCustomW(e.target.value)} placeholder='Width (in)' style={S.inp} />
                 <input type="number" step="0.1" value={customH} onChange={(e) => setCustomH(e.target.value)} placeholder='Height (in)' style={S.inp} />
               </div>
+              <div style={{ marginTop: 8 }}>
+                <label style={{ ...S.lbl, marginBottom: 4 }}>Base ream sheet (custom sheet is cut from this)</label>
+                <select
+                  value={customBaseKey}
+                  onChange={(e) => setCustomBaseKey(e.target.value)}
+                  style={{ ...S.inp, padding: "6px 10px", fontSize: 12 }}
+                >
+                  {Object.entries(catalog).map(([k, v]) => (
+                    <option key={k} value={k}>{v.label}</option>
+                  ))}
+                </select>
+                {customResult?.parentSheetsPerBaseSheet > 1 && (
+                  <p style={{ ...S.hint, marginTop: 4 }}>
+                    {customResult.parentSheetsPerBaseSheet} custom sheets cut per{" "}
+                    {catalog[customBaseKey]?.w}×{catalog[customBaseKey]?.h}" ream sheet
+                    → 1 ream = {(500 * customResult.parentSheetsPerBaseSheet).toLocaleString()} usable parent sheets
+                  </p>
+                )}
+              </div>
               {customResult && (
                 <div
-                  onClick={() => onSelect("custom", { w: Number(customW), h: Number(customH) })}
+                  onClick={() => onSelect("custom", {
+                    w: Number(customW),
+                    h: Number(customH),
+                    baseSheet: customBaseKey,
+                    sheetsPerBase: customResult.parentSheetsPerBaseSheet,
+                  })}
                   style={{
                     marginTop: 10,
                     cursor: "pointer",
@@ -170,6 +219,11 @@ export default function ImpositionAdvisor({
                   <div style={{ fontSize: 11, color: "#888" }}>
                     {customResult.pagesPerSide} pages/side · {customResult.forms} forms · {customResult.numPlates} plates ·{" "}
                     {customResult.wastagePct.toFixed(0)}% waste
+                    {customResult.parentSheetsPerBaseSheet > 1 && (
+                      <span style={{ marginLeft: 6, color: "#27AE60" }}>
+                        · {customResult.reamsNeeded} reams (×{customResult.parentSheetsPerBaseSheet})
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>{GHS(customResult.totalCost)}</div>
                 </div>

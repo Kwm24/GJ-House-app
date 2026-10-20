@@ -42,7 +42,9 @@ export const DEFAULT_RATES = {
   impressionRate: 120,
   coverPlateRate: 750,
   coverPaperRate: 350,
+  coverReamSize: 100,
   foldCollateRate: 0.6,
+  trimRate: 0.4,
   // Binding rates per copy by type
   bindSaddleStitch: 0.5,
   bindPerfect: 0.9,
@@ -68,7 +70,9 @@ export const RATE_GROUPS = [
       { key: "impressionRate", label: "Impression rate (per run)" },
       { key: "coverPlateRate", label: "Cover plate (per plate)" },
       { key: "coverPaperRate", label: "Cover paper (per ream)" },
+      { key: "coverReamSize",  label: "Cover stock: sheets per ream" },
       { key: "foldCollateRate", label: "Fold & collate (per copy)" },
+      { key: "trimRate",       label: "Trimming (per copy)" },
     ],
   },
   {

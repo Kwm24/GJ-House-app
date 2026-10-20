@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
+import { Search } from "lucide-react";
 import { listAllExpenditures } from "../../lib/expenditures.js";
 import { formatGHS as GHS } from "../../lib/currency.js";
 import { exportToCsv } from "../../lib/csvExport.js";
+import { PeriodPicker, filterByPeriod, defaultPeriod } from "../PeriodPicker.jsx";
 
 function jobLabel(exp) {
   if (!exp.jobs) return "Not linked to a job";
@@ -26,6 +28,8 @@ export function ExpenditureTab() {
   const [expenditures, setExpenditures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [period, setPeriod] = useState(defaultPeriod());
 
   const loadExpenditures = useCallback(async () => {
     setLoading(true);
@@ -43,13 +47,10 @@ export function ExpenditureTab() {
     loadExpenditures();
   }, [loadExpenditures]);
 
-  const groups = groupByJob(expenditures);
-  const overallTotal = expenditures.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-
   function handleExport() {
     exportToCsv(
       `accounts-expenditure-${new Date().toISOString().slice(0, 10)}.csv`,
-      expenditures.map((e) => ({
+      visibleExpenditures.map((e) => ({
         Date: e.date,
         Job: jobLabel(e),
         "Recorded by": e.recorded_by || "",
@@ -59,6 +60,21 @@ export function ExpenditureTab() {
       }))
     );
   }
+
+  const periodExpenditures = filterByPeriod(expenditures, period, "date");
+  const q = search.toLowerCase().trim();
+  const visibleExpenditures = q
+    ? periodExpenditures.filter((e) =>
+        (e.description ?? "").toLowerCase().includes(q) ||
+        (e.vendor ?? "").toLowerCase().includes(q) ||
+        (e.recorded_by ?? "").toLowerCase().includes(q) ||
+        (e.jobs?.job_title ?? "").toLowerCase().includes(q) ||
+        (e.jobs?.quote_ref ?? "").toLowerCase().includes(q)
+      )
+    : periodExpenditures;
+
+  const groups = groupByJob(visibleExpenditures);
+  const overallTotal = visibleExpenditures.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
@@ -71,13 +87,11 @@ export function ExpenditureTab() {
         </div>
       )}
 
-      <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
-            <h2 className="text-lg sm:text-xl font-semibold text-brand-dark">
-              Expenditure
-            </h2>
-            <p className="mt-1 text-sm text-gray-600">
+            <h2 className="text-lg sm:text-xl font-semibold text-[var(--t-text1)]">Expenditure</h2>
+            <p className="mt-1 text-sm text-[var(--t-muted)]">
               Every expense recorded across CS, Production, and Designer, grouped by job.
             </p>
           </div>
@@ -85,10 +99,27 @@ export function ExpenditureTab() {
             type="button"
             onClick={handleExport}
             disabled={expenditures.length === 0}
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="rounded-lg border border-[var(--t-border)] bg-[var(--t-bg)] px-4 py-2 text-sm font-medium text-[var(--t-text2)] hover:bg-gray-100 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             ⬇ Export CSV
           </button>
+        </div>
+
+        {/* Period filter */}
+        <div className="mb-4">
+          <PeriodPicker period={period} onChange={setPeriod} accentColor="#C0392B" />
+        </div>
+
+        {/* Search */}
+        <div className="relative mb-5">
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--t-muted)]" />
+          <input
+            type="text"
+            placeholder="Search by description, vendor, job or recorded by…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-[var(--t-border)] bg-[var(--t-bg)] pl-9 pr-4 py-2.5 text-sm text-[var(--t-text1)] placeholder:text-[var(--t-muted)] focus:outline-none focus:ring-2 focus:ring-brand-red/20 focus:border-brand-red transition-colors"
+          />
         </div>
 
         {loading ? (
@@ -98,18 +129,18 @@ export function ExpenditureTab() {
               aria-label="Loading"
             />
           </div>
-        ) : !error && expenditures.length === 0 ? (
-          <p className="mt-8 text-center text-sm text-gray-500 py-8">
-            No expenditures recorded yet.
+        ) : !error && visibleExpenditures.length === 0 ? (
+          <p className="mt-8 text-center text-sm text-[var(--t-muted)] py-8">
+            {search ? "No expenditures match your search." : "No expenditures recorded yet."}
           </p>
         ) : (
-          <div className="mt-4 space-y-6">
+          <div className="mt-2 space-y-6">
             {groups.map((group, i) => (
               <div key={i} className="overflow-x-auto">
-                <h3 className="text-sm font-semibold text-brand-dark">{group.label}</h3>
+                <h3 className="text-sm font-semibold text-[var(--t-text1)]">{group.label}</h3>
                 <table className="mt-2 w-full text-sm">
                   <thead>
-                    <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b border-gray-300">
+                    <tr className="text-left text-xs uppercase tracking-wide text-[var(--t-muted)] border-b border-[var(--t-border)]">
                       <th className="py-2 pr-4">Date</th>
                       <th className="py-2 pr-4">Description</th>
                       <th className="py-2 pr-4">Vendor</th>
@@ -119,14 +150,14 @@ export function ExpenditureTab() {
                   </thead>
                   <tbody>
                     {group.items.map((exp) => (
-                      <tr key={exp.id} className="border-b border-gray-200">
-                        <td className="py-2 pr-4 whitespace-nowrap text-gray-600">{exp.date}</td>
-                        <td className="py-2 pr-4 text-brand-dark">{exp.description}</td>
-                        <td className="py-2 pr-4 text-gray-600">{exp.vendor || "—"}</td>
-                        <td className="py-2 pr-4 text-gray-600 capitalize">
+                      <tr key={exp.id} className="border-b border-[var(--t-border)]">
+                        <td className="py-2 pr-4 whitespace-nowrap text-[var(--t-muted)]">{exp.date}</td>
+                        <td className="py-2 pr-4 text-[var(--t-text1)]">{exp.description}</td>
+                        <td className="py-2 pr-4 text-[var(--t-text2)]">{exp.vendor || "—"}</td>
+                        <td className="py-2 pr-4 text-[var(--t-text2)] capitalize">
                           {exp.recorded_by || "—"}
                         </td>
-                        <td className="py-2 pr-4 text-right text-gray-700 whitespace-nowrap">
+                        <td className="py-2 pr-4 text-right text-[var(--t-text2)] whitespace-nowrap">
                           {GHS(exp.amount)}
                         </td>
                       </tr>
@@ -134,10 +165,10 @@ export function ExpenditureTab() {
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={4} className="py-2 pr-4 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <td colSpan={4} className="py-2 pr-4 text-right text-xs font-semibold uppercase tracking-wide text-[var(--t-muted)]">
                         Job total
                       </td>
-                      <td className="py-2 pr-4 text-right font-semibold text-brand-dark whitespace-nowrap">
+                      <td className="py-2 pr-4 text-right font-semibold text-[var(--t-text1)] whitespace-nowrap">
                         {GHS(group.total)}
                       </td>
                     </tr>
@@ -146,9 +177,9 @@ export function ExpenditureTab() {
               </div>
             ))}
 
-            <div className="rounded-lg bg-brand-dark text-brand-cream px-5 py-4 flex items-center justify-between">
+            <div className="rounded-lg px-5 py-4 flex items-center justify-between" style={{ background: "var(--t-text1)", color: "var(--t-bg)" }}>
               <span className="text-sm font-semibold uppercase tracking-wide">
-                Overall total
+                {search ? "Filtered total" : "Overall total"}
               </span>
               <span className="text-xl font-bold">{GHS(overallTotal)}</span>
             </div>

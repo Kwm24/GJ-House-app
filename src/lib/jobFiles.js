@@ -12,6 +12,18 @@ export async function uploadDesignFile(jobId, file) {
   return path;
 }
 
+// Uploads a file from a customer for their own job; stored in customer-uploads/{jobId}/...
+export async function uploadCustomerFile(jobId, file) {
+  const ext = file.name.split(".").pop() || "bin";
+  const path = `customer-uploads/${jobId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await supabase.storage.from("job_files").upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+  });
+  if (error) throw error;
+  return path;
+}
+
 // Uploads a reference (resource) file to Supabase Storage and returns its path.
 export async function uploadReferenceFile(jobId, file) {
   const ext = file.name.split(".").pop() || "bin";
@@ -47,6 +59,20 @@ export async function listJobFiles(jobId, fileType) {
     .select("*")
     .eq("job_id", jobId)
     .eq("file_type", fileType)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data;
+}
+
+// All files uploaded by a specific user for a job — regardless of type.
+// Used in the customer portal so customers see everything they've uploaded.
+export async function listCustomerUploadedFiles(jobId, userId) {
+  const { data, error } = await supabase
+    .from("job_files")
+    .select("*")
+    .eq("job_id", jobId)
+    .eq("uploaded_by", userId)
     .order("created_at", { ascending: false });
 
   if (error) throw error;

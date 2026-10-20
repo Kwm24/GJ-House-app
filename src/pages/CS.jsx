@@ -7,56 +7,87 @@ import { ExpenditureRecorder } from "../components/ExpenditureRecorder.jsx";
 import { SentTab } from "../components/cs/SentTab.jsx";
 import { JobsTab } from "../components/cs/JobsTab.jsx";
 import { ResourcesTab } from "../components/cs/ResourcesTab.jsx";
+import { CustomersTab } from "../components/cs/CustomersTab.jsx";
+import { Calculator, FileText, Briefcase, Package, Receipt, Send, FolderOpen, Users } from "lucide-react";
 
 const TABS = [
-  { id: "quotes",      label: "Print Quotes" },
-  { id: "invoices",    label: "Invoices"     },
-  { id: "jobs",        label: "Jobs"         },
-  { id: "items",       label: "Items"        },
-  { id: "expenditure", label: "Expenditure"  },
-  { id: "sent",        label: "Sent"         },
-  { id: "resources",   label: "Resources"    },
+  { id: "quotes",      label: "Print Quotes", Icon: Calculator  },
+  { id: "invoices",    label: "Invoices",     Icon: FileText    },
+  { id: "jobs",        label: "Jobs",         Icon: Briefcase   },
+  { id: "customers",   label: "Customers",    Icon: Users       },
+  { id: "items",       label: "Items",        Icon: Package     },
+  { id: "expenditure", label: "Expenditure",  Icon: Receipt     },
+  { id: "sent",        label: "Sent",         Icon: Send        },
+  { id: "resources",   label: "Resources",    Icon: FolderOpen  },
 ];
 
 export function CS() {
-  const [activeTab, setActiveTab] = useState("quotes");
+  const [activeTab,     setActiveTab]     = useState("quotes");
+  const [focusJobId,     setFocusJobId]   = useState(null);
+  const [focusInvoiceId, setFocusInvoiceId] = useState(null);
+
+  function handleNavigateToJob(jobId) {
+    setFocusJobId(jobId);
+    setActiveTab("jobs");
+  }
+
+  function handleNavigateToInvoice(invoice) {
+    setFocusInvoiceId(invoice?.id ?? invoice ?? null);
+    setActiveTab("invoices");
+  }
 
   return (
-    <div className="min-h-screen bg-brand-dark">
+    <div className="min-h-screen" style={{ background: "var(--t-bg)" }}>
       <LobbyHeader
         title="Customer Service"
         subtitle="Quotes, expenditure & client communications"
+        onNavigateToJob={handleNavigateToJob}
       />
 
-      <nav
-        className="border-b border-white/10 bg-brand-dark/95 backdrop-blur-sm sticky top-[var(--lobby-header-offset,0)] z-10"
-        aria-label="CS sections"
+      <div
+        className="sticky top-14 z-10 border-b backdrop-blur-sm px-4 sm:px-6 py-3"
+        style={{ background: "var(--t-nav-bg)", borderColor: "var(--t-border)" }}
       >
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="flex gap-1 sm:gap-2 -mb-px overflow-x-auto scrollbar-none">
-            {TABS.map((tab) => (
+        <div className="mx-auto max-w-6xl">
+          <nav
+            className="flex items-center gap-1 p-1 bg-[var(--t-surface)] border border-[var(--t-border)] rounded-xl overflow-x-auto scrollbar-none"
+            aria-label="CS sections"
+          >
+            {TABS.map(({ id, label, Icon }) => (
               <button
-                key={tab.id}
+                key={id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => setActiveTab(id)}
                 className={[
-                  "shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                  activeTab === tab.id
-                    ? "border-brand-red text-brand-cream"
-                    : "border-transparent text-brand-cream/50 hover:text-brand-cream/80",
+                  "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red/40",
+                  activeTab === id
+                    ? "bg-brand-red text-white shadow-sm"
+                    : "text-[var(--t-text2)] hover:bg-gray-100 dark:hover:bg-white/5",
                 ].join(" ")}
               >
-                {tab.label}
+                <Icon size={14} />
+                {label}
               </button>
             ))}
-          </div>
+          </nav>
         </div>
-      </nav>
+      </div>
 
-      <div className="min-h-[calc(100vh-8rem)]">
+      <div className="min-h-[calc(100vh-8rem)] animate-fade-in">
         {activeTab === "quotes"      && <QuotesTab />}
-        {activeTab === "invoices"    && <InvoicesTab />}
-        {activeTab === "jobs"        && <JobsTab />}
+        {activeTab === "invoices"    && (
+          <InvoicesTab
+            focusInvoiceId={focusInvoiceId}
+            onFocusConsumed={() => setFocusInvoiceId(null)}
+          />
+        )}
+        {activeTab === "jobs"        && <JobsTab focusJobId={focusJobId} />}
+        {activeTab === "customers"   && (
+          <CustomersTab
+            onJobClick={handleNavigateToJob}
+            onInvoiceClick={handleNavigateToInvoice}
+          />
+        )}
         {activeTab === "items"       && <ItemsTab />}
         {activeTab === "expenditure" && <ExpenditureRecorder recordedBy="cs" />}
         {activeTab === "sent"        && <SentTab />}

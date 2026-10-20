@@ -42,14 +42,46 @@ Deno.serve(async (req) => {
 
   const { data: callerProfile } = await adminClient
     .from("profiles").select("role").eq("user_id", caller.id).maybeSingle();
-  if (callerProfile?.role !== "admin") return json({ error: "Admins only" }, 403);
+  const callerRole = callerProfile?.role ?? null;
 
   let body;
   try { body = await req.json(); } catch {
     return json({ error: "Invalid request body" }, 400);
   }
 
-  const { email, role, fullName } = body ?? {};
+  const { action = "create", email, role, fullName, userId: targetUserId, newEmail } = body ?? {};
+
+  // ── action: update_email ───────────────────────────────────────────────────
+  if (action === "update_email") {
+    if (!["cs", "admin"].includes(callerRole)) return json({ error: "CS or admin only" }, 403);
+    if (!targetUserId || !newEmail) return json({ error: "userId and newEmail are required" }, 400);
+
+    const { error: authErr } = await adminClient.auth.admin.updateUserById(targetUserId, { email: newEmail });
+    if (authErr) return json({ error: authErr.message }, 400);
+
+    // Keep the profiles table in sync
+    await adminClient.from("profiles").update({ email: newEmail }).eq("user_id", targetUserId);
+
+    return json({ ok: true, email: newEmail });
+  }
+
+  // ── action: send_password_reset ────────────────────────────────────────────
+  if (action === "send_password_reset") {
+    if (!["cs", "admin"].includes(callerRole)) return json({ error: "CS or admin only" }, 403);
+    if (!email) return json({ error: "email is required" }, 400);
+
+    const { error: resetErr } = await adminClient.auth.admin.generateLink({
+      type: "recovery",
+      email,
+    });
+    if (resetErr) return json({ error: resetErr.message }, 400);
+
+    return json({ ok: true });
+  }
+
+  // ── action: create (default) ───────────────────────────────────────────────
+  if (callerRole !== "admin") return json({ error: "Admins only" }, 403);
+
   if (!email || !role || !ALLOWED_ROLES.includes(role)) {
     return json({ error: "A valid email and role are required" }, 400);
   }

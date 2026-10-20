@@ -3,7 +3,9 @@ import { useAuth } from "./AuthProvider.jsx";
 import { LoadingScreen } from "./LoadingScreen.jsx";
 import { getRouteForRole } from "../lib/routes.js";
 
-export function ProtectedRoute({ allowedRoles, children }) {
+// loginPath: optional custom login route to redirect unauthenticated users to
+// (e.g. "/cs/login"). Falls back to the global "/login" when omitted.
+export function ProtectedRoute({ allowedRoles, loginPath, children }) {
   const { user, profile, loading } = useAuth();
   const location = useLocation();
 
@@ -12,7 +14,13 @@ export function ProtectedRoute({ allowedRoles, children }) {
   }
 
   if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return (
+      <Navigate
+        to={loginPath ?? "/login"}
+        state={{ from: location }}
+        replace
+      />
+    );
   }
 
   if (allowedRoles?.length && profile) {

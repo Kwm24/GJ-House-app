@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { useAuth } from "./AuthProvider.jsx";
 import {
   listNotifications,
@@ -18,13 +18,15 @@ function timeAgo(iso) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export function NotificationBell() {
+export function NotificationBell({ onJobClick }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState(null);
   const panelRef = useRef(null);
+  const toastTimer = useRef(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -52,8 +54,16 @@ export function NotificationBell() {
     return subscribeToNotifications(user.id, (row) => {
       setItems((prev) => [row, ...prev].slice(0, 20));
       setUnreadCount((c) => c + 1);
+      // Show a brief toast so the user sees the notification even if they're
+      // not looking at the bell.
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      setToast(row);
+      toastTimer.current = setTimeout(() => setToast(null), 4500);
     });
   }, [user]);
+
+  // Clean up toast timer on unmount
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -76,19 +86,48 @@ export function NotificationBell() {
   }
 
   async function handleItemClick(n) {
-    if (n.read) return;
-    try {
-      await markNotificationRead(n.id);
-      setItems((prev) => prev.map((row) => (row.id === n.id ? { ...row, read: true } : row)));
-      setUnreadCount((c) => Math.max(0, c - 1));
-    } catch {
-      // best-effort
+    if (!n.read) {
+      try {
+        await markNotificationRead(n.id);
+        setItems((prev) => prev.map((row) => (row.id === n.id ? { ...row, read: true } : row)));
+        setUnreadCount((c) => Math.max(0, c - 1));
+      } catch {
+        // best-effort
+      }
+    }
+    if (n.job_id && onJobClick) {
+      setOpen(false);
+      onJobClick(n.job_id);
     }
   }
 
   if (!user) return null;
 
   return (
+    <Fragment>
+    {/* ── Toast popup ── fixed overlay, visible even when bell is closed */}
+    {toast && (
+      <div
+        className="fixed top-4 right-4 z-50 flex items-start gap-3 rounded-xl bg-brand-dark border border-white/10 text-brand-cream shadow-2xl px-4 py-3 max-w-xs w-full"
+        role="alert"
+      >
+        <span className="text-lg shrink-0 mt-0.5">🔔</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-brand-red mb-0.5">
+            New notification
+          </p>
+          <p className="text-sm leading-snug line-clamp-3">{toast.message}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { clearTimeout(toastTimer.current); setToast(null); }}
+          className="shrink-0 text-brand-cream/40 hover:text-brand-cream text-lg leading-none ml-1"
+          aria-label="Dismiss"
+        >
+          ×
+        </button>
+      </div>
+    )}
     <div className="relative" ref={panelRef}>
       <button
         type="button"
@@ -105,7 +144,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-80 max-w-[90vw] rounded-xl border border-gray-200 bg-white shadow-lg">
+        <div className="absolute right-0 z-40 mt-2 w-80 max-w-[90vw] rounded-xl border border-gray-200 bg-white shadow-lg" style={{ zIndex: 40 }}>
           <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
             <span className="text-sm font-semibold text-brand-dark">Notifications</span>
             {unreadCount > 0 && (
@@ -131,7 +170,7 @@ export function NotificationBell() {
                   type="button"
                   onClick={() => handleItemClick(n)}
                   className={[
-                    "block w-full text-left px-4 py-3 text-sm border-b border-gray-100 hover:bg-gray-50 transition-colors",
+                    "block w-full text-left px-4 py-3 text-sm border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer",
                     n.read ? "text-gray-500" : "text-brand-dark font-medium",
                   ].join(" ")}
                 >
@@ -139,10 +178,13 @@ export function NotificationBell() {
                     {!n.read && (
                       <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-red" />
                     )}
-                    <div className="min-w-0">
-                      <p className="truncate">{n.message}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-2">{n.message}</p>
                       <p className="mt-0.5 text-xs text-gray-400">{timeAgo(n.created_at)}</p>
                     </div>
+                    {n.job_id && onJobClick && (
+                      <span className="shrink-0 text-gray-400 mt-0.5">→</span>
+                    )}
                   </div>
                 </button>
               ))
@@ -151,5 +193,6 @@ export function NotificationBell() {
         </div>
       )}
     </div>
+    </Fragment>
   );
 }
