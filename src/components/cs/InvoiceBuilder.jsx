@@ -279,8 +279,8 @@ export default function InvoiceBuilder({
   const [importDigitalRef,    setImportDigitalRef]    = useState("");
 
   useEffect(() => {
-    try { setSavedPrintQuotes(loadSavedQuotes()); } catch {}
-    try { setSavedDigitalQuotes(loadDigitalQuotes()); } catch {}
+    loadSavedQuotes().then(setSavedPrintQuotes).catch(() => {});
+    loadDigitalQuotes().then(setSavedDigitalQuotes).catch(() => {});
   }, []);
 
   const selectedImportQuote = useMemo(

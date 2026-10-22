@@ -13,7 +13,7 @@ export function QuotesTab() {
   const [digitalQuotes, setDigitalQuotes] = useState([]);
 
   useEffect(() => {
-    if (quoteType === "digital") setDigitalQuotes(loadDigitalQuotes());
+    if (quoteType === "digital") loadDigitalQuotes().then(setDigitalQuotes).catch(() => {});
   }, [quoteType, mode]);
 
   function handleCreate() {
@@ -26,8 +26,9 @@ export function QuotesTab() {
     setMode("create");
   }
 
-  function handleDeleteDigital(ref) {
-    setDigitalQuotes(deleteDigitalQuote(ref));
+  async function handleDeleteDigital(ref) {
+    const next = await deleteDigitalQuote(ref).catch(() => null);
+    if (next) setDigitalQuotes(next);
   }
 
   // When switching quote type, reset to list mode

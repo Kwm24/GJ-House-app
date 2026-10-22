@@ -435,10 +435,9 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
     const ref = quoteRef || genRefNo();
     if (!quoteRef) setQuoteRef(ref);
     const snapshot = { ...buildQuoteSnapshot(), ref };
-    try {
-      saveQuoteToStorage(snapshot);
-      alert(`Quote ${ref} saved!`);
-    } catch { alert("Could not save — localStorage unavailable."); }
+    saveQuoteToStorage(snapshot)
+      .then(() => alert(`Quote ${ref} saved!`))
+      .catch(() => alert("Could not save — please try again."));
   };
 
   const generate = () => {

@@ -23,11 +23,12 @@ export function SavedQuotesPanel({ onLoad }) {
   const [quotes, setQuotes] = useState([]);
 
   useEffect(() => {
-    setQuotes(loadSavedQuotes());
+    loadSavedQuotes().then(setQuotes).catch(() => {});
   }, []);
 
-  const del = (ref) => {
-    setQuotes(deleteSavedQuote(ref));
+  const del = async (ref) => {
+    const next = await deleteSavedQuote(ref).catch(() => null);
+    if (next) setQuotes(next);
   };
 
   if (!quotes.length) {

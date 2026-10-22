@@ -24,6 +24,8 @@ const TABLES_IN_ORDER = [
   "payments",
   "expenditures",
   "jobs",
+  "invoices",
+  "saved_quotes",
 ];
 
 Deno.serve(async (req) => {

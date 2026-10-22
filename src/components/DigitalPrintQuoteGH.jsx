@@ -320,7 +320,7 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
       rates,
     };
 
-    saveDigitalQuoteToStorage(snapshot);
+    saveDigitalQuoteToStorage(snapshot).catch(console.error);
     setSaveMsg(`Saved as ${quoteRef}`);
     setTimeout(() => setSaveMsg(""), 4000);
   }
@@ -605,7 +605,10 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
               </p>
             </div>
             <p className="mt-3 text-[11px] text-[var(--t-muted)] text-center">
-              {qty} copies × {leavesPerCopy} leaf{leavesPerCopy !== 1 ? 'ves' : ''} = {qty * leavesPerCopy} pieces ÷ {pickedResult.up} up = {Math.ceil(qty * leavesPerCopy / pickedResult.up)} sheets, +waste = <strong>{pickedResult.sheets}</strong>.
+              {isBook
+                ? `${normPages} pp · ${leavesPerCopy} leaf${leavesPerCopy !== 1 ? 'ves' : ''}/copy · ${pickedResult.up}-up${duplex ? ` (${pickedResult.up * 2} pages/sheet)` : ''} · ${qty * leavesPerCopy} pieces ÷ ${pickedResult.up} = ${Math.ceil(qty * leavesPerCopy / pickedResult.up)} sheets, +waste = `
+                : `${qty} copies × ${leavesPerCopy} leaf${leavesPerCopy !== 1 ? 'ves' : ''} = ${qty * leavesPerCopy} pieces ÷ ${pickedResult.up} up = ${Math.ceil(qty * leavesPerCopy / pickedResult.up)} sheets, +waste = `}
+              <strong>{pickedResult.sheets}</strong>.
             </p>
           </>
         ) : (

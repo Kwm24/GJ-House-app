@@ -176,6 +176,26 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
   const parentSheetLabel = PARENT_SHEETS[specJob.parentSheet]?.label ?? "—";
   const bindingLabel     = BINDING_TYPES.find((b) => b.value === specJob.bindingType)?.label ?? "—";
   const lamLabel         = LAM_TYPES.find((l) => l.value === specJob.laminationType)?.label ?? "—";
+  const coloursLabel     = specJob.colours === "1" ? "1 colour"
+    : specJob.colours === "4" ? "Full colour"
+    : `${specJob.colours ?? "—"} colours`;
+
+  // Designer view: only the 4 fields they need
+  if (variant === "designer") {
+    return (
+      <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-red mb-4">
+          Print specification
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <SpecTile icon="📐" label="Finished size"   value={bookSizeLabel} />
+          <SpecTile icon="📖" label="Pages"           value={specJob.numPages ?? "—"} />
+          <SpecTile icon="🎨" label="Colours"         value={coloursLabel} />
+          <SpecTile icon="📚" label="Binding"         value={bindingLabel} />
+        </div>
+      </div>
+    );
+  }
 
   const plateSub = specJob.useManualPlates
     ? "entered manually"
@@ -206,9 +226,7 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
         </div>
         <div>
           <dt className="text-xs text-[var(--t-muted)]">Colours</dt>
-          <dd className="font-medium text-[var(--t-text1)]">
-            {specJob.colours === "1" ? "1 colour" : specJob.colours === "4" ? "Full colour" : `${specJob.colours ?? "—"} colours`}
-          </dd>
+          <dd className="font-medium text-[var(--t-text1)]">{coloursLabel}</dd>
         </div>
         <div>
           <dt className="text-xs text-[var(--t-muted)]">Book size</dt>
@@ -222,18 +240,14 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
 
       {/* Spec tiles */}
       <div className="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {variant !== "designer" && (
-          <>
-            <SpecTile icon="🗞️" label="Plates" value={r.numPlates ?? "—"} sub={plateSub} />
-            <SpecTile
-              icon="📄"
-              label="Paper"
-              value={r.paper?.reamsNeeded ? `${r.paper.reamsNeeded} reams` : "—"}
-              sub={r.paper ? `${r.paper.sheetsPerCopy} sheets/copy · ${r.paper.pagesPerSheet} pages/sheet` : null}
-            />
-            <SpecTile icon="🖨️" label="Impressions" value={r.impressions ?? "—"} sub="press runs" />
-          </>
-        )}
+        <SpecTile icon="🗞️" label="Plates" value={r.numPlates ?? "—"} sub={plateSub} />
+        <SpecTile
+          icon="📄"
+          label="Paper"
+          value={r.paper?.reamsNeeded ? `${r.paper.reamsNeeded} reams` : "—"}
+          sub={r.paper ? `${r.paper.sheetsPerCopy} sheets/copy · ${r.paper.pagesPerSheet} pages/sheet` : null}
+        />
+        <SpecTile icon="🖨️" label="Impressions" value={r.impressions ?? "—"} sub="press runs" />
         <SpecTile icon="📚" label="Binding" value={bindingLabel} />
         {specJob.hasCover && (
           <>
@@ -251,9 +265,7 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
             />
           </>
         )}
-        {variant !== "designer" && (
-          <SpecTile icon="🗂️" label="Fold & Collate" value="✓" sub="per copy" />
-        )}
+        <SpecTile icon="🗂️" label="Fold & Collate" value="✓" sub="per copy" />
       </div>
     </div>
   );

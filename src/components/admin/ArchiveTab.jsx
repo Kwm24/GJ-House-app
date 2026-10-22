@@ -127,8 +127,8 @@ export function ArchiveTab() {
       <div className="rounded-xl border-2 border-red-200 bg-red-50 p-5 sm:p-8">
         <h2 className="text-lg sm:text-xl font-semibold text-red-900">Clear database</h2>
         <p className="mt-1 text-sm text-red-700">
-          Permanently deletes all jobs, expenditures, payments, notifications, and job
-          file records — for a clean start to a new financial year.
+          Permanently deletes all jobs, invoices, expenditures, payments, notifications,
+          job file records, and saved quotes — for a clean start to a new financial year.
           Staff accounts and app settings are <strong>not</strong> deleted.
         </p>
         <p className="mt-2 text-sm font-semibold text-red-800">
