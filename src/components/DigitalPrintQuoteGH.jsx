@@ -77,7 +77,8 @@ function calcComparison(w, h, pieces, duplex, stock, rates) {
     const f = fitOnSheet(S.w - 2 * rates.margin, S.h - 2 * rates.margin, w, h, rates.gutter);
     if (!f.up) { results[name] = { name, up: 0 }; continue; }
     const base      = Math.ceil(pieces / f.up);
-    const sheets    = base + Math.ceil(base * rates.wastePct / 100) + rates.wasteFixed;
+    // Cap wasteFixed at base so small-run jobs aren't inflated (e.g. 1 cover → 7 sheets)
+    const sheets    = base + Math.ceil(base * rates.wastePct / 100) + Math.min(rates.wasteFixed, base);
     const printCost = duplex ? S.p2 : S.p1;
     const paperCost = (rates.stocks[stock] || {})[name] || 0;
     const perSheet  = printCost + paperCost;

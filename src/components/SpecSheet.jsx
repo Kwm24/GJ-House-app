@@ -25,7 +25,7 @@ const DIGITAL_JOB_LABELS = {
 };
 
 // Shown for jobs created from the Digital Print Quoter.
-function DigitalPrintItemCard({ job }) {
+function DigitalPrintItemCard({ job, variant }) {
   const quote  = job.quote ?? {};
   const qJob   = quote.job   ?? {};
   const result = quote.result ?? {};
@@ -51,6 +51,23 @@ function DigitalPrintItemCard({ job }) {
     : qJob.sizeKey === 'Custom'
       ? `${qJob.customW}×${qJob.customH} mm`
       : qJob.sizeKey || '—';
+
+  // Designer view: 4 tiles (finished size, pages, colours, binding)
+  if (variant === "designer") {
+    return (
+      <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-red mb-4">
+          Print Item Specifications
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <SpecTile icon="📐" label="Finished size"  value={sizeLabel} />
+          <SpecTile icon="📖" label="Pages"          value={qJob.pages ? String(qJob.pages) : "N/A"} />
+          <SpecTile icon="🎨" label="Colours"        value="Full colour" />
+          <SpecTile icon="📚" label="Binding"        value={qJob.bindType || "None"} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
@@ -84,10 +101,31 @@ function DigitalPrintItemCard({ job }) {
 }
 
 // Shown for general-invoice jobs (no quote type) that have print items on the invoice.
-// Column header renamed from "Material / Substrate" to "Description".
-function PrintItemsCard({ lineItems }) {
+function PrintItemsCard({ lineItems, variant }) {
   const printLines = (lineItems ?? []).filter((li) => li.printSpecs);
   if (printLines.length === 0) return null;
+
+  // Designer view: one SpecTile block per print item showing size + material
+  if (variant === "designer") {
+    return (
+      <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-red mb-4">
+          Print Item Specifications
+        </h3>
+        {printLines.map((li, i) => (
+          <div key={i} className={i > 0 ? "mt-4 pt-4 border-t border-[var(--t-border)]" : ""}>
+            <p className="text-xs font-semibold text-[var(--t-text2)] mb-2">{li.name}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <SpecTile icon="📐" label="Finished size" value={li.printSpecs.size || "—"} />
+              <SpecTile icon="📖" label="Pages"         value="—" />
+              <SpecTile icon="🎨" label="Colours"       value="—" />
+              <SpecTile icon="📚" label="Material"      value={li.printSpecs.material || li.printSpecs.description || "—"} />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
@@ -138,7 +176,7 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
 
   // ── Digital print job ──────────────────────────────────────────────────────
   if (quote.quoteType === 'digital') {
-    return <DigitalPrintItemCard job={job} />;
+    return <DigitalPrintItemCard job={job} variant={variant} />;
   }
 
   // ── Offset print job ───────────────────────────────────────────────────────
@@ -151,7 +189,7 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
     // General invoice — no recognised quote type
     return (
       <>
-        <PrintItemsCard lineItems={invoiceLineItems} />
+        <PrintItemsCard lineItems={invoiceLineItems} variant={variant} />
         <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-red">
             Print specification

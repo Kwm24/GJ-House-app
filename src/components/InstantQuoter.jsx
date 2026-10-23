@@ -61,15 +61,6 @@ function fitOnSheet(W, H, w, h, g) {
   return rotated.up > normal.up ? rotated : normal;
 }
 
-function calcSheet(W, H, w, h, pieces, duplex, stock, rates) {
-  const f = fitOnSheet(W - 2 * rates.margin, H - 2 * rates.margin, w, h, rates.gutter);
-  if (!f.up) return null;
-  const base   = Math.ceil(pieces / f.up);
-  const sheets = base + Math.ceil(base * rates.wastePct / 100) + rates.wasteFixed;
-  const print  = duplex ? rates.sheets[DIGITAL_SHEET_NAMES.find((n) => rates.sheets[n]?.w === W && rates.sheets[n]?.h === H)]?.p2 : null;
-  return { f, sheets, up: f.up };
-}
-
 function cheapestSheet(w, h, pieces, duplex, stock, rates) {
   let best = null;
   for (const name of DIGITAL_SHEET_NAMES) {
@@ -77,8 +68,9 @@ function cheapestSheet(w, h, pieces, duplex, stock, rates) {
     if (!S) continue;
     const f = fitOnSheet(S.w - 2 * rates.margin, S.h - 2 * rates.margin, w, h, rates.gutter);
     if (!f.up) continue;
-    const base     = Math.ceil(pieces / f.up);
-    const sheets   = base + Math.ceil(base * rates.wastePct / 100) + rates.wasteFixed;
+    const base      = Math.ceil(pieces / f.up);
+    // Cap wasteFixed at base so small-run jobs aren't inflated (e.g. 1 cover → 7 sheets)
+    const sheets    = base + Math.ceil(base * rates.wastePct / 100) + Math.min(rates.wasteFixed, base);
     const printCost = duplex ? S.p2 : S.p1;
     const paperCost = (rates.stocks[stock] || {})[name] || 0;
     const cost = sheets * (printCost + paperCost);
