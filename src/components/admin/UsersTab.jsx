@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Search } from "lucide-react";
 import { useAuth } from "../AuthProvider.jsx";
-import { listProfiles, setProfileActive, inviteUser } from "../../lib/adminUsers.js";
+import { listProfiles, setProfileActive, inviteUser, listRatesEditorIds, setRatesPermission } from "../../lib/adminUsers.js";
 import { ROLE_ROUTES } from "../../lib/routes.js";
 import { CustomerProfilePanel } from "../CustomerProfilePanel.jsx";
 
@@ -26,12 +26,16 @@ export function UsersTab() {
   const [role, setRole] = useState(ROLE_OPTIONS[0]);
   const [inviting, setInviting] = useState(false);
   const [inviteMsg, setInviteMsg] = useState("");
+  // Production accounts allowed to edit digital rates (null = migration 037 not run)
+  const [ratesEditors, setRatesEditors] = useState(null);
 
   const loadProfiles = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      setProfiles(await listProfiles());
+      const [rows, editors] = await Promise.all([listProfiles(), listRatesEditorIds()]);
+      setProfiles(rows);
+      setRatesEditors(editors);
     } catch (err) {
       setError(err.message ?? "Could not load users.");
     } finally {
@@ -74,6 +78,25 @@ export function UsersTab() {
       setProfiles((prev) => prev.map((row) => (row.id === p.id ? updated : row)));
     } catch (err) {
       setError(err.message ?? "Could not update account status.");
+    }
+  }
+
+  async function handleToggleRates(p) {
+    const allow = !ratesEditors?.has(p.id);
+    const who = p.email || p.full_name || "this account";
+    const msg = allow
+      ? `Let ${who} edit Digital Print Quoter rates from the Production lobby?`
+      : `Stop ${who} from editing Digital Print Quoter rates?`;
+    if (!window.confirm(msg)) return;
+    try {
+      await setRatesPermission(p.id, allow);
+      setRatesEditors((prev) => {
+        const next = new Set(prev);
+        if (allow) next.add(p.id); else next.delete(p.id);
+        return next;
+      });
+    } catch (err) {
+      setError(err.message ?? "Could not update rates permission.");
     }
   }
 
@@ -241,7 +264,14 @@ export function UsersTab() {
                   <tr key={p.id} className="border-b border-[var(--t-border)] hover:bg-gray-50 dark:hover:bg-white/3 transition-colors">
                     <td className="py-2.5 pr-4 text-[var(--t-text1)]">{p.full_name || "—"}</td>
                     <td className="py-2.5 pr-4 text-[var(--t-text2)]">{p.email || "—"}</td>
-                    <td className="py-2.5 pr-4 capitalize text-[var(--t-text2)]">{p.role}</td>
+                    <td className="py-2.5 pr-4 capitalize text-[var(--t-text2)]">
+                      {p.role}
+                      {p.role === "production" && ratesEditors?.has(p.id) && (
+                        <span className="ml-2 rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium normal-case text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
+                          Rates editor
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2.5 pr-4">
                       <span
                         className={[
@@ -263,6 +293,16 @@ export function UsersTab() {
                             className="text-xs font-medium text-[#6366F1] hover:underline"
                           >
                             View Profile
+                          </button>
+                        )}
+                        {p.role === "production" && ratesEditors && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleRates(p)}
+                            className="text-xs font-medium text-[#6366F1] hover:underline"
+                            title="Lets this production account edit Digital Print Quoter rates"
+                          >
+                            {ratesEditors.has(p.id) ? "Remove rates access" : "Allow rates editing"}
                           </button>
                         )}
                         {p.user_id === user?.id ? (

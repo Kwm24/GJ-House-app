@@ -20,7 +20,7 @@ import {
   getJobFinalDownloadUrl,
   approveDesign,
 } from "../lib/jobs.js";
-import { listCustomerUploadedFiles, getJobFileSignedUrl, uploadCustomerFile, uploadDesignFile, uploadReferenceFile, recordJobFile } from "../lib/jobFiles.js";
+import { listJobFiles, listCustomerUploadedFiles, getJobFileSignedUrl, uploadCustomerFile, uploadDesignFile, uploadReferenceFile, recordJobFile } from "../lib/jobFiles.js";
 import { listCustomerDocuments, TYPE_COLORS, STATUS_COLORS as INV_STATUS_COLORS } from "../lib/invoices.js";
 import { listPublicItems } from "../lib/items.js";
 import { getSettings } from "../lib/settings.js";
@@ -1471,15 +1471,15 @@ export function CustomerPage() {
             })()}
           </>
         ) : section === "quoter" ? (
-          /* ── Instant Quoter ── */
+          /* ── Live Quote ── */
           <>
             <div className="mb-4">
               <h2 className="text-base font-bold text-[var(--t-text1)]">Get a Price</h2>
               <p className="text-xs text-[var(--t-muted)] mt-0.5">
-                Instant digital print pricing — see your estimate right away.
+                Live Quote: digital print pricing, see your estimate right away.
               </p>
             </div>
-            <InstantQuoter accentHex={accentHex} onResult={setQuoteSummary} />
+            <InstantQuoter accentHex={accentHex} onResult={setQuoteSummary} whatsappNumber={whatsappNumber} />
             <div className="mt-4 flex flex-col items-center gap-2">
               {(() => {
                 const waMsg = quoteSummary ? buildInstantQuoteSummary(quoteSummary) : null;

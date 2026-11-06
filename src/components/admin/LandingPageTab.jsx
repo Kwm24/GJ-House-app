@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Image, Trash2, ExternalLink, Upload, Eye, EyeOff } from "lucide-react";
-import { getSettings, updateSettings, uploadLandingImage, uploadServiceImage, uploadCompanyLogo, uploadFavicon, applyFavicon } from "../../lib/settings.js";
+import { getSettings, updateSettings, uploadLandingImage, uploadServiceImage, uploadStepImage, uploadCompanyLogo, uploadFavicon, applyFavicon } from "../../lib/settings.js";
 
 const DEFAULT_LANDING = {
   hero: {
@@ -253,8 +253,8 @@ function SectionBgEditor({ sectionKey, label, style, onChange, hasOverlay = true
   );
 }
 
-// ── Service image uploader ────────────────────────────────────────────────────
-function ServiceImageUploader({ index, imageUrl, onChange }) {
+// ── Card image uploader (service cards + process step cards) ─────────────────
+function ServiceImageUploader({ index, imageUrl, onChange, upload = uploadServiceImage, alt = "Service card preview" }) {
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -265,7 +265,7 @@ function ServiceImageUploader({ index, imageUrl, onChange }) {
     setUploading(true);
     setUploadError("");
     try {
-      const url = await uploadServiceImage(index, file);
+      const url = await upload(index, file);
       onChange(url);
     } catch (err) {
       setUploadError(err.message ?? "Upload failed.");
@@ -288,7 +288,7 @@ function ServiceImageUploader({ index, imageUrl, onChange }) {
 
       {imageUrl ? (
         <div className="relative rounded-lg overflow-hidden border border-[var(--t-border)]">
-          <img src={imageUrl} alt="Service card preview" className="w-full h-20 object-cover" />
+          <img src={imageUrl} alt={alt} className="w-full h-20 object-cover" />
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
@@ -687,6 +687,13 @@ export function LandingPageTab() {
             <div key={i} className="rounded-lg border border-[var(--t-border)] p-3 space-y-2">
               <Field label={`Step ${i + 1} Title`} value={step.title} onChange={(v) => setStep(i, "title", v)} />
               <Field label="Description" value={step.description} onChange={(v) => setStep(i, "description", v)} multiline />
+              <ServiceImageUploader
+                index={i}
+                imageUrl={step.image_url || ""}
+                onChange={(url) => setStep(i, "image_url", url)}
+                upload={uploadStepImage}
+                alt={`Step ${i + 1} preview`}
+              />
             </div>
           ))}
         </div>

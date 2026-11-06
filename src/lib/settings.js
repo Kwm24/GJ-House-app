@@ -15,6 +15,36 @@ export async function uploadServiceImage(index, file) {
   return publicUrl;
 }
 
+// Image for a "How it works" process step card on the landing page.
+export async function uploadStepImage(index, file) {
+  const ext = file.name.split(".").pop() || "jpg";
+  // Timestamp in the name so a replaced image isn't served stale from cache
+  const path = `landing/step-${index}-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage
+    .from("company-assets")
+    .upload(path, file, { upsert: true, cacheControl: "3600" });
+  if (error) throw error;
+  const { data: { publicUrl } } = supabase.storage
+    .from("company-assets")
+    .getPublicUrl(path);
+  return publicUrl;
+}
+
+// Background image for every sign-in / sign-up screen.
+export async function uploadLoginBackground(file) {
+  const ext = file.name.split(".").pop() || "jpg";
+  // Timestamp in the name so a replaced image isn't served stale from cache
+  const path = `login/background-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage
+    .from("company-assets")
+    .upload(path, file, { upsert: true, cacheControl: "3600" });
+  if (error) throw error;
+  const { data: { publicUrl } } = supabase.storage
+    .from("company-assets")
+    .getPublicUrl(path);
+  return publicUrl;
+}
+
 export async function uploadLandingImage(section, file) {
   const ext = file.name.split(".").pop() || "jpg";
   const path = `landing/${section}-bg.${ext}`;
@@ -107,4 +137,13 @@ export async function updateSettings(patch) {
 
   if (error) throw error;
   return data;
+}
+
+// Save the Digital Print Quoter rates. Admins update settings directly;
+// production rate-editors go through update_digital_rates(), a database
+// function that checks their permission and touches only digital_quote_rates.
+export async function saveDigitalRates(rates, { asProduction = false } = {}) {
+  if (!asProduction) return updateSettings({ digital_quote_rates: rates });
+  const { error } = await supabase.rpc("update_digital_rates", { rates });
+  if (error) throw error;
 }

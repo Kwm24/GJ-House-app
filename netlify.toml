@@ -1,0 +1,14 @@
+# Netlify build settings for PrintPress GH (Vite + React)
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Single-page app: every route (e.g. /customer, /cs/login) loads index.html
+# and React Router takes it from there. (Same rule as public/_redirects.)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

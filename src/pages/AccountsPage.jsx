@@ -6,10 +6,12 @@ import { ExpenditureTab } from "../components/accounts/ExpenditureTab.jsx";
 import { PaymentsTab } from "../components/accounts/PaymentsTab.jsx";
 import { SummaryTab } from "../components/accounts/SummaryTab.jsx";
 import { DigitalJobsTab } from "../components/accounts/DigitalJobsTab.jsx";
+import { CostBreakdownTab } from "../components/accounts/CostBreakdownTab.jsx";
 
 const TABS = [
   { id: "jobs",         label: "Jobs" },
   { id: "digital",     label: "Digital Jobs" },
+  { id: "costs",       label: "Cost Breakdown" },
   { id: "expenditure", label: "Expenditure" },
   { id: "payments",    label: "Payments" },
   { id: "summary",     label: "Summary" },
@@ -62,6 +64,7 @@ export function AccountsPage() {
             <DigitalJobsTab />
           </div>
         )}
+        {activeTab === "costs"        && <CostBreakdownTab />}
         {activeTab === "expenditure" && <ExpenditureTab />}
         {activeTab === "payments" && <PaymentsTab />}
         {activeTab === "summary" && <SummaryTab />}

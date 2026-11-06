@@ -15,11 +15,11 @@
 // ─── DEFAULT PARENT SHEET CATALOG (inches) ───────────────────────────────────
 // Standard offset "parent" sheet sizes used by presses in Ghana / West Africa.
 export const DEFAULT_PARENT_SHEET_CATALOG = {
-  standard: { w: 30,   h: 40,   label: 'Standard (30×40")' },
-  nigeria:  { w: 24,   h: 30,   label: 'Nigeria (24×30")' },
-  sra1:     { w: 25.2, h: 35.4, label: 'SRA1 (25.2×35.4")' },
-  quarto:   { w: 25,   h: 38,   label: 'Quarto (25×38")' },
-  demy:     { w: 22.5, h: 35,   label: 'Demy (22.5×35")' },
+  standard: { w: 30,   h: 40,   label: 'Standard (30in × 40in)' },
+  nigeria:  { w: 24,   h: 30,   label: 'Nigeria (24in × 30in)' },
+  sra1:     { w: 25.2, h: 35.4, label: 'SRA1 (25.2in × 35.4in)' },
+  quarto:   { w: 25,   h: 38,   label: 'Quarto (25in × 38in)' },
+  demy:     { w: 22.5, h: 35,   label: 'Demy (22.5in × 35in)' },
 };
 
 // ─── BINDING ADVISORY RULES ──────────────────────────────────────────────────

@@ -4,7 +4,8 @@ import { useAuth } from "../components/AuthProvider.jsx";
 import { DesignerJobsTab } from "../components/designer/DesignerJobsTab.jsx";
 import { MyDesignJobsTab } from "../components/designer/MyDesignJobsTab.jsx";
 import { DesignHistoryTab } from "../components/designer/DesignHistoryTab.jsx";
-import { LayoutGrid, Pen, Clock } from "lucide-react";
+import { DesignerDashboardTab } from "../components/designer/DesignerDashboardTab.jsx";
+import { LayoutGrid, Pen, Clock, LayoutDashboard } from "lucide-react";
 
 export function DesignerPage() {
   const { profile } = useAuth();
@@ -16,11 +17,12 @@ export function DesignerPage() {
         { id: "history", label: "Design History",  Icon: Clock      },
       ]
     : [
+        { id: "dashboard", label: "Dashboard",     Icon: LayoutDashboard },
         { id: "myjobs",  label: "My Jobs",         Icon: Pen        },
         { id: "history", label: "Design History",  Icon: Clock      },
       ];
 
-  const [activeTab,  setActiveTab]  = useState(isAdmin ? "jobs" : "myjobs");
+  const [activeTab,  setActiveTab]  = useState(isAdmin ? "jobs" : "dashboard");
   const [focusJobId, setFocusJobId] = useState(null);
 
   function handleNavigateToJob(jobId) {
@@ -70,6 +72,7 @@ export function DesignerPage() {
       </div>
 
       <div className="min-h-[calc(100vh-8rem)] animate-fade-in">
+        {activeTab === "dashboard" && <DesignerDashboardTab onOpenJob={handleNavigateToJob} />}
         {activeTab === "jobs"    && <DesignerJobsTab />}
         {activeTab === "myjobs"  && <MyDesignJobsTab focusJobId={focusJobId} />}
         {activeTab === "history" && <DesignHistoryTab />}

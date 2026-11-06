@@ -1,14 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LobbyHeader } from "../components/LobbyHeader.jsx";
 import { useAuth } from "../components/AuthProvider.jsx";
 import { ProductionJobsTab } from "../components/production/ProductionJobsTab.jsx";
 import { MyProductionJobsTab } from "../components/production/MyProductionJobsTab.jsx";
 import { ExpenditureRecorder } from "../components/ExpenditureRecorder.jsx";
-import { Hammer, LayoutGrid, Receipt } from "lucide-react";
+import { ProductionDashboardTab } from "../components/production/ProductionDashboardTab.jsx";
+import { DigitalRatesEditor } from "../components/DigitalRatesEditor.jsx";
+import { getMyRatesPermission } from "../lib/myStats.js";
+import { Hammer, LayoutGrid, Receipt, LayoutDashboard, SlidersHorizontal } from "lucide-react";
 
 export function ProductionPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
+
+  // Production accounts the admin has allowed to edit Digital Print Quoter rates
+  const [canEditRates, setCanEditRates] = useState(false);
+  useEffect(() => {
+    if (isAdmin) return;
+    getMyRatesPermission().then(setCanEditRates).catch(() => setCanEditRates(false));
+  }, [isAdmin]);
 
   const TABS = isAdmin
     ? [
@@ -16,11 +26,13 @@ export function ProductionPage() {
         { id: "expenditure", label: "Expenditure",         Icon: Receipt    },
       ]
     : [
+        { id: "dashboard",   label: "Dashboard",           Icon: LayoutDashboard },
         { id: "myjobs",      label: "My Jobs",             Icon: Hammer     },
         { id: "expenditure", label: "Expenditure",         Icon: Receipt    },
+        ...(canEditRates ? [{ id: "rates", label: "Digital rates", Icon: SlidersHorizontal }] : []),
       ];
 
-  const [activeTab,  setActiveTab]  = useState(isAdmin ? "jobs" : "myjobs");
+  const [activeTab,  setActiveTab]  = useState(isAdmin ? "jobs" : "dashboard");
   const [focusJobId, setFocusJobId] = useState(null);
 
   function handleNavigateToJob(jobId) {
@@ -70,9 +82,15 @@ export function ProductionPage() {
       </div>
 
       <div className="min-h-[calc(100vh-8rem)] animate-fade-in">
+        {activeTab === "dashboard"   && <ProductionDashboardTab onOpenJob={handleNavigateToJob} />}
         {activeTab === "jobs"        && <ProductionJobsTab />}
         {activeTab === "myjobs"      && <MyProductionJobsTab focusJobId={focusJobId} />}
         {activeTab === "expenditure" && <ExpenditureRecorder recordedBy="production" />}
+        {activeTab === "rates" && canEditRates && (
+          <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+            <DigitalRatesEditor asProduction />
+          </div>
+        )}
       </div>
     </div>
   );

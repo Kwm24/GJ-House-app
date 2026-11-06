@@ -4,6 +4,7 @@ import { signInWithEmail, getProfile, signOut } from "../lib/auth.js";
 import { getRouteForRole } from "../lib/routes.js";
 import { useAuth } from "../components/AuthProvider.jsx";
 import { LoadingScreen } from "../components/LoadingScreen.jsx";
+import { GoogleSignIn, OrDivider } from "../components/GoogleSignIn.jsx";
 
 export function Login() {
   const navigate = useNavigate();
@@ -25,6 +26,32 @@ export function Login() {
 
   if (user && profile) {
     return <Navigate to={getRouteForRole(profile.role)} replace />;
+  }
+
+  // Shared by email and Google sign-in: load the profile and route by role
+  async function finishSignIn(signedInUser) {
+    const userProfile = await getProfile(signedInUser.id);
+
+    if (!userProfile?.role) {
+      setError("Your account has no role assigned. Contact your administrator.");
+      return;
+    }
+    if (userProfile.is_active === false) {
+      await signOut();
+      setError("Your account has been deactivated. Contact your administrator.");
+      return;
+    }
+    setProfile(userProfile);
+    navigate(getRouteForRole(userProfile.role), { replace: true });
+  }
+
+  async function handleGoogle(signedInUser) {
+    setError("");
+    try {
+      await finishSignIn(signedInUser);
+    } catch (err) {
+      setError(err.message ?? "Could not sign in with Google.");
+    }
   }
 
   async function handleSubmit(e) {
@@ -82,6 +109,9 @@ export function Login() {
             {error}
           </div>
         )}
+
+        <GoogleSignIn mode="signin" onSignedIn={handleGoogle} onError={setError} />
+        <OrDivider />
 
         <div>
           <label

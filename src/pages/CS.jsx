@@ -8,9 +8,11 @@ import { SentTab } from "../components/cs/SentTab.jsx";
 import { JobsTab } from "../components/cs/JobsTab.jsx";
 import { ResourcesTab } from "../components/cs/ResourcesTab.jsx";
 import { CustomersTab } from "../components/cs/CustomersTab.jsx";
-import { Calculator, FileText, Briefcase, Package, Receipt, Send, FolderOpen, Users } from "lucide-react";
+import { CSDashboardTab } from "../components/cs/CSDashboardTab.jsx";
+import { LayoutDashboard, Calculator, FileText, Briefcase, Package, Receipt, Send, FolderOpen, Users } from "lucide-react";
 
 const TABS = [
+  { id: "dashboard",   label: "Dashboard",    Icon: LayoutDashboard },
   { id: "quotes",      label: "Print Quotes", Icon: Calculator  },
   { id: "invoices",    label: "Invoices",     Icon: FileText    },
   { id: "jobs",        label: "Jobs",         Icon: Briefcase   },
@@ -22,7 +24,7 @@ const TABS = [
 ];
 
 export function CS() {
-  const [activeTab,     setActiveTab]     = useState("quotes");
+  const [activeTab,     setActiveTab]     = useState("dashboard");
   const [focusJobId,     setFocusJobId]   = useState(null);
   const [focusInvoiceId, setFocusInvoiceId] = useState(null);
 
@@ -74,6 +76,7 @@ export function CS() {
       </div>
 
       <div className="min-h-[calc(100vh-8rem)] animate-fade-in">
+        {activeTab === "dashboard"   && <CSDashboardTab onOpenInvoice={handleNavigateToInvoice} />}
         {activeTab === "quotes"      && <QuotesTab />}
         {activeTab === "invoices"    && (
           <InvoicesTab

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { getJob } from "../../lib/jobs.js";
+import { getInvoiceByRef } from "../../lib/invoices.js";
 import { buildWhatsAppChatUrl } from "../../lib/jobNotify.js";
 import { SpecSheet } from "../SpecSheet.jsx";
 import { ResourcesTab } from "./ResourcesTab.jsx";
@@ -17,6 +18,8 @@ export function JobDetail({ jobId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("spec");
+  // Invoice lines let the spec sheet show every print quote on a multi-quote invoice
+  const [invoiceLineItems, setInvoiceLineItems] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -24,6 +27,11 @@ export function JobDetail({ jobId, onBack }) {
     try {
       const data = await getJob(jobId);
       setJob(data);
+      if (data?.quote_ref) {
+        getInvoiceByRef(data.quote_ref)
+          .then((inv) => setInvoiceLineItems(inv?.line_items ?? []))
+          .catch(() => {}); // non-fatal — spec sheet still renders without it
+      }
     } catch (err) {
       setError(err.message ?? "Could not load job.");
     } finally {
@@ -125,7 +133,7 @@ export function JobDetail({ jobId, onBack }) {
         </div>
 
         <div className="mt-4">
-          {activeTab === "spec" && <SpecSheet job={job} variant="designer" />}
+          {activeTab === "spec" && <SpecSheet job={job} invoiceLineItems={invoiceLineItems} variant="designer" />}
           {activeTab === "resources" && (
             <div className="rounded-xl bg-[var(--t-surface)] border border-[var(--t-border)] p-5 sm:p-8">
               <ResourcesTab jobId={job.id} />

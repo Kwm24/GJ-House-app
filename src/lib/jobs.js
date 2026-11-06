@@ -1,6 +1,10 @@
 import { supabase } from "./supabase.js";
 
 function quoteGrandTotal(quoteSnapshot) {
+  // Invoices holding several saved quotes store the invoice total on the bundle
+  if (quoteSnapshot?.quoteType === "multi") {
+    return quoteSnapshot?.grandTotal ?? 0;
+  }
   // Digital quotes store the total directly in result.sellPrice
   if (quoteSnapshot?.quoteType === "digital") {
     return quoteSnapshot?.result?.sellPrice ?? 0;

@@ -1,4 +1,5 @@
-import { PARENT_SHEETS, BOOK_SIZES, LAM_TYPES, BINDING_TYPES } from "../lib/printSpecs.js";
+import { PARENT_SHEETS, LAM_TYPES, BINDING_TYPES, offsetBookLabel, offsetSheetLabel } from "../lib/printSpecs.js";
+import { digitalJobSizeLabel } from "../lib/digitalPrintSpecs.js";
 
 function SpecTile({ icon, label, value, sub }) {
   return (
@@ -46,11 +47,7 @@ function DigitalPrintItemCard({ job, variant }) {
     return parts.join(' · ') || '—';
   })();
 
-  const sizeLabel = result.isLF
-    ? `${qJob.lfWidth}×${qJob.lfHeight} ${qJob.lfUnit}`
-    : qJob.sizeKey === 'Custom'
-      ? `${qJob.customW}×${qJob.customH} mm`
-      : qJob.sizeKey || '—';
+  const sizeLabel = (result.isLF || qJob.sizeKey) ? digitalJobSizeLabel(qJob) : '—';
 
   // Designer view: 4 tiles (finished size, pages, colours, binding)
   if (variant === "designer") {
@@ -174,6 +171,26 @@ function PrintItemsCard({ lineItems, variant }) {
 export function SpecSheet({ job, invoiceLineItems, variant }) {
   const quote = job.quote ?? {};
 
+  // ── Invoice with several saved quotes as print items ───────────────────────
+  // Show each quote's own full spec, then any other print items on the invoice.
+  if (quote.quoteType === 'multi') {
+    const quotes     = quote.quotes ?? [];
+    const otherLines = (invoiceLineItems ?? []).filter((li) => !li.quoteRef);
+    return (
+      <div className="space-y-6">
+        {quotes.map((q, i) => (
+          <div key={`${q.quoteRef}-${i}`} className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--t-muted)]">
+              Item {i + 1} of {quotes.length}: {q.name} · {q.quoteType === 'offset' ? 'Offset' : 'Digital'} quote {q.quoteRef}
+            </p>
+            <SpecSheet job={{ ...job, quote: q.snapshot ?? {} }} variant={variant} />
+          </div>
+        ))}
+        <PrintItemsCard lineItems={otherLines} variant={variant} />
+      </div>
+    );
+  }
+
   // ── Digital print job ──────────────────────────────────────────────────────
   if (quote.quoteType === 'digital') {
     return <DigitalPrintItemCard job={job} variant={variant} />;
@@ -210,8 +227,12 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
   }
 
   // Offset print — full spec tiles, no PrintItemsCard
-  const bookSizeLabel    = BOOK_SIZES[specJob.bookSize]?.label || `${specJob.bookW}"×${specJob.bookH}"`;
-  const parentSheetLabel = PARENT_SHEETS[specJob.parentSheet]?.label ?? "—";
+  // Shown in the unit the quote was made in (older quotes: inches)
+  const specUnit         = specJob.dimUnit || "in";
+  const bookSizeLabel    = offsetBookLabel(specJob, specUnit);
+  const parentSheetLabel = specJob.parentSheet === "custom"
+    ? offsetSheetLabel({ w: specJob.customSheetW, h: specJob.customSheetH, label: "Custom" }, specUnit)
+    : PARENT_SHEETS[specJob.parentSheet] ? offsetSheetLabel(PARENT_SHEETS[specJob.parentSheet], specUnit) : "—";
   const bindingLabel     = BINDING_TYPES.find((b) => b.value === specJob.bindingType)?.label ?? "—";
   const lamLabel         = LAM_TYPES.find((l) => l.value === specJob.laminationType)?.label ?? "—";
   const coloursLabel     = specJob.colours === "1" ? "1 colour"

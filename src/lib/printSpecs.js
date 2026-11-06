@@ -1,17 +1,34 @@
+import { presetLabel, fmtDims } from "./units.js";
+
 export const PARENT_SHEETS = {
-  standard: { w: 30,   h: 40,   label: 'Standard (30×40")' },
-  nigeria:  { w: 24,   h: 30,   label: 'Nigeria (24×30")' },
-  sra1:     { w: 25.2, h: 35.4, label: 'SRA1 (25.2×35.4")' },
-  quarto:   { w: 25,   h: 38,   label: 'Quarto (25×38")' },
-  demy:     { w: 22.5, h: 35,   label: 'Demy (22.5×35")' },
+  standard: { w: 30,   h: 40,   label: 'Standard (30in × 40in)' },
+  nigeria:  { w: 24,   h: 30,   label: 'Nigeria (24in × 30in)' },
+  sra1:     { w: 25.2, h: 35.4, label: 'SRA1 (25.2in × 35.4in)' },
+  quarto:   { w: 25,   h: 38,   label: 'Quarto (25in × 38in)' },
+  demy:     { w: 22.5, h: 35,   label: 'Demy (22.5in × 35in)' },
 };
 
 export const BOOK_SIZES = {
-  A5: { w: 5.83, h: 8.27, label: 'A5 (5.83 × 8.27")' },
-  A4: { w: 8.27, h: 11.69, label: 'A4 (8.27 × 11.69")' },
-  A3: { w: 11.69, h: 16.54, label: 'A3 (11.69 × 16.54")' },
+  A5: { w: 148 / 25.4, h: 210 / 25.4, label: 'A5 (148mm × 210mm)' },   // exact ISO size, stored in inches
+  A4: { w: 210 / 25.4, h: 297 / 25.4, label: 'A4 (210mm × 297mm)' },
+  A3: { w: 297 / 25.4, h: 420 / 25.4, label: 'A3 (297mm × 420mm)' },
   Custom: { w: 0, h: 0, label: "Custom" },
 };
+
+// Offset sizes are stored in inches. These helpers show them in any unit:
+// offsetBookLabel(job, "mm") → "A5 (148.1mm × 210.1mm)" / "Custom (150mm × 200mm)"
+export function offsetBookLabel(job = {}, unit = "in") {
+  const preset = BOOK_SIZES[job.bookSize];
+  if (preset && job.bookSize !== "Custom") return presetLabel(job.bookSize, preset.w, preset.h, "in", unit);
+  return `Custom (${fmtDims(job.bookW, job.bookH, "in", unit)})`;
+}
+
+// A parent sheet ({ w, h, label }) in any unit: "Standard (30in × 40in)".
+export function offsetSheetLabel(sheet, unit = "in") {
+  if (!sheet) return "";
+  const name = String(sheet.label || "Custom").split(" (")[0];
+  return presetLabel(name, sheet.w, sheet.h, "in", unit);
+}
 
 // Lamination types — each with its own rate key
 export const LAM_TYPES = [

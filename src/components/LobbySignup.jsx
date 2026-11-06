@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { signUpStaff } from "../lib/auth.js";
+import { LoginBackdrop } from "./LoginBackdrop.jsx";
 
 const inputClass =
   "w-full rounded-lg border border-genesis-border bg-genesis-surface px-3.5 py-2.5 text-sm text-genesis-text1 " +
@@ -56,6 +57,7 @@ export function LobbySignup({ icon, title, subtitle, role, loginPath }) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12 relative"
         style={{ background: "linear-gradient(135deg, #1C1C1E 0%, #111113 60%, #1a1020 100%)" }}>
+        <LoginBackdrop />
         <div className="pointer-events-none absolute inset-0 opacity-[0.04]" aria-hidden="true"
           style={{ backgroundImage: "radial-gradient(circle, #fff 1px, transparent 1px)", backgroundSize: "28px 28px" }} />
         <div className="relative w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl text-center"
@@ -85,6 +87,8 @@ export function LobbySignup({ icon, title, subtitle, role, loginPath }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12 relative"
       style={{ background: "linear-gradient(135deg, #1C1C1E 0%, #111113 60%, #1a1020 100%)" }}>
+
+      <LoginBackdrop />
 
       <div className="pointer-events-none absolute inset-0 opacity-[0.04]" aria-hidden="true"
         style={{ backgroundImage: "radial-gradient(circle, #fff 1px, transparent 1px)", backgroundSize: "28px 28px" }} />

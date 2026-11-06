@@ -21,8 +21,10 @@ import { CustomerPicker } from "./CustomerPicker.jsx";
 import { saveQuoteToStorage } from "../lib/quoteStorage.js";
 import { getSettings } from "../lib/settings.js";
 import { fitOnSheet, resolveSheetDims } from "../lib/imposition.js";
+import { OffsetQuoteBreakdown } from "./quote/OffsetQuoteBreakdown.jsx";
 import ImpositionAdvisor from "./ImpositionAdvisor.jsx";
-import { formatGHS as GHS } from "../lib/currency.js";
+import { DimensionInput, UnitSelect } from "./DimensionInput.jsx";
+import { presetLabel } from "../lib/units.js";
 import {
   PARENT_SHEETS,
   BOOK_SIZES,
@@ -30,6 +32,7 @@ import {
   BINDING_TYPES,
   DEFAULT_RATES,
   RATE_GROUPS,
+  offsetBookLabel, offsetSheetLabel,
 } from "../lib/printSpecs.js";
 
 // ─── PRINT STYLES (injected into <head>) ─────────────────────────────────────
@@ -74,7 +77,7 @@ const VAT_RATE = 0.20;
 
 const PLATE_SIZES = [
   { value: "full_sheet", label: "Full sheet (plate = parent sheet)" },
-  { value: "kord64",     label: "Heidelberg KORD 64 (18.1×25.2\")", w: 18.1, h: 25.2 },
+  { value: "kord64",     label: "Heidelberg KORD 64", w: 18.1, h: 25.2 },   // label + size shown in the chosen unit
   { value: "custom",     label: "Custom plate size" },
 ];
 
@@ -112,7 +115,7 @@ const COVER_SHEETS_PER_REAM = 100;
 
 function resolveSheet(job) {
   const base = job.parentSheet === "custom"
-    ? { w: job.customSheetW, h: job.customSheetH, label: `Custom (${job.customSheetW}×${job.customSheetH}")` }
+    ? { w: job.customSheetW, h: job.customSheetH, label: "Custom" }
     : PARENT_SHEETS[job.parentSheet];
   return resolveSheetDims(base, job.parentSheetOrientation);
 }
@@ -262,42 +265,6 @@ function Toggle({ on, onToggle, label, sublabel }) {
   );
 }
 
-// ─── COST BAR ────────────────────────────────────────────────────────────────
-function CostBar({ r, qty }) {
-  if (!r) return null;
-  const items = [
-    { label: "Plates",      val: r.plateCost,                              color: "#6366F1" },
-    { label: "Paper",       val: r.paperCost,                              color: "#E67E22" },
-    { label: "Impressions", val: r.impressionCost,                         color: "#2980B9" },
-    { label: "Post-press",  val: (r.trimCost || 0) + r.foldCost + r.bindingCost, color: "#27AE60" },
-    { label: "Cover",       val: r.coverPlateCost + r.coverPaperCost + r.coverLamCost + (r.coverImpressionCost || 0), color: "#8E44AD" },
-    { label: "Margin",      val: r.margin,                                 color: "#7F8C8D" },
-    { label: "VAT",         val: r.vatAmt,                                 color: "#BDC3C7" },
-  ].filter(i => i.val > 0);
-  const total = items.reduce((s, i) => s + i.val, 0);
-  return (
-    <div className="cost-bar-wrap mb-5">
-      <p className="text-[10px] text-[var(--t-muted)] mb-1.5 tracking-widest uppercase">
-        Cost breakdown &mdash; {qty?.toLocaleString()} copies
-      </p>
-      <div className="flex h-3 rounded-full overflow-hidden gap-px">
-        {items.map(i => (
-          <div key={i.label} title={`${i.label}: ${GHS(i.val)}`}
-            style={{ width: `${(i.val / total) * 100}%`, background: i.color, transition: "width 0.4s" }} />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
-        {items.map(i => (
-          <span key={i.label} className="text-[10px] text-[var(--t-muted)] flex items-center gap-1">
-            <span style={{ width: 7, height: 7, borderRadius: 2, background: i.color, display: "inline-block" }} />
-            {i.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function PrintQuoteGH({ embedded = false, csMode = false, initialQuote = null }) {
 
@@ -311,7 +278,8 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
   const [job, setJob] = useState({
     clientName: "", clientPhone: "", clientEmail: "", jobTitle: "", invoiceNo: "", date: new Date().toISOString().slice(0, 10),
     numPages: 136, colours: "1",
-    bookSize: "A5", bookW: 5.83, bookH: 8.27,
+    bookSize: "A5", bookW: BOOK_SIZES.A5.w, bookH: BOOK_SIZES.A5.h,
+    dimUnit: "in",   // unit sizes are shown/typed in; sizes are still stored + priced in inches
     parentSheet: "standard",
     printOrientation: "portrait",
     parentSheetOrientation: "portrait",
@@ -375,6 +343,8 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
   }, [initialQuote]);
 
   const setJ = (k, v) => setJob(j => ({ ...j, [k]: v }));
+  // Older saved quotes have no dimUnit — they were always in inches
+  const dimUnit = job.dimUnit || "in";
   const setR = (k, v) => setRates(r => ({ ...r, [k]: Number(v) }));
 
   const allQtys = useMemo(() => {
@@ -460,18 +430,6 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
       })
       .from(printRef.current)
       .save();
-  };
-
-  // Print-critical inline styles only — everything else uses Tailwind classes above
-  const S = {
-    tbl:     { width: "100%", borderCollapse: "collapse", fontSize: 12 },
-    th:      { padding: "8px 10px", background: "#1C1C1E", color: "#F5F0E8", textAlign: "right", fontFamily: "monospace", fontSize: 11, fontWeight: 600 },
-    thF:     { textAlign: "left", width: 190 },
-    td:      { padding: "6px 10px", borderBottom: "1px solid #E5DFD5", color: "#333", textAlign: "right", fontFamily: "monospace", fontSize: 12 },
-    tdF:     { textAlign: "left", fontFamily: "inherit", fontSize: 11, color: "#666" },
-    tdSub:   { fontWeight: 700, color: "#1C1C1E", background: "#EDE7D9" },
-    tdGrand: { fontWeight: 700, color: "#C0392B", background: "#FAE8E6", fontSize: 14 },
-    pill:    (bg) => ({ display: "inline-block", background: bg || "#555", color: "#fff", borderRadius: 10, padding: "1px 7px", fontSize: 10, marginLeft: 6 }),
   };
 
   // ─── RENDER ────────────────────────────────────────────────────────────────
@@ -573,23 +531,29 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
               </div>
               <div className="grid grid-cols-2 gap-3 mt-3">
                 <div>
-                  <label className={LBL}>Book / print size</label>
+                  <div className="flex items-end justify-between gap-2">
+                    <label className={LBL}>Book / print size</label>
+                    <UnitSelect value={dimUnit} onChange={(u) => setJ("dimUnit", u)} ariaLabel="Size unit"
+                      className="mb-1 rounded-md border border-[var(--t-border)] bg-[var(--t-surface)] px-2 py-1 text-xs text-[var(--t-text1)]" />
+                  </div>
                   <select className={INP} value={job.bookSize} onChange={e => {
                     const sz = BOOK_SIZES[e.target.value];
                     setJob(j => ({ ...j, bookSize: e.target.value, bookW: sz.w, bookH: sz.h }));
                   }}>
-                    {Object.entries(BOOK_SIZES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    {Object.entries(BOOK_SIZES).map(([k, v]) => (
+                      <option key={k} value={k}>{k === "Custom" ? "Custom size" : presetLabel(k, v.w, v.h, "in", dimUnit)}</option>
+                    ))}
                   </select>
                 </div>
                 {job.bookSize === "Custom" ? (
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className={LBL}>Width (in)</label>
-                      <input className={INP} type="number" step="0.1" value={job.bookW} onChange={e => setJ("bookW", Number(e.target.value))} />
+                      <label className={LBL}>Width ({dimUnit})</label>
+                      <DimensionInput className={INP} value={job.bookW} baseUnit="in" displayUnit={dimUnit} onChange={v => setJ("bookW", v)} />
                     </div>
                     <div>
-                      <label className={LBL}>Height (in)</label>
-                      <input className={INP} type="number" step="0.1" value={job.bookH} onChange={e => setJ("bookH", Number(e.target.value))} />
+                      <label className={LBL}>Height ({dimUnit})</label>
+                      <DimensionInput className={INP} value={job.bookH} baseUnit="in" displayUnit={dimUnit} onChange={v => setJ("bookH", v)} />
                     </div>
                   </div>
                 ) : paperPreview ? (
@@ -615,6 +579,11 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                   bookW={job.bookW} bookH={job.bookH} numPages={job.numPages} colours={job.colours}
                   bindingType={job.bindingType} qty={allQtys[0] || 1000} rates={rates}
                   value={job.parentSheet} orientation={job.printOrientation}
+                  unit={dimUnit}
+                  customSheet={job.parentSheet === "custom" ? {
+                    w: job.customSheetW, h: job.customSheetH,
+                    baseSheet: job.customBaseSheet, sheetsPerBase: job.customSheetsPerBase,
+                  } : null}
                   onOrientationChange={(o) => setJ("printOrientation", o)}
                   sheetOrientation={job.parentSheetOrientation}
                   onSheetOrientationChange={(o) => setJ("parentSheetOrientation", o)}
@@ -646,19 +615,19 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                     <button key={ps.value} type="button"
                       className={chip(job.plateSize === ps.value || (!job.plateSize && ps.value === "full_sheet"))}
                       onClick={() => setJ("plateSize", ps.value)}>
-                      {ps.label}
+                      {ps.w ? presetLabel(ps.label, ps.w, ps.h, "in", dimUnit) : ps.label}
                     </button>
                   ))}
                 </div>
                 {job.plateSize === "custom" && (
                   <div className="grid grid-cols-2 gap-3 mt-3 max-w-sm">
                     <div>
-                      <label className={LBL}>Plate width (in)</label>
-                      <input className={INP} type="number" step="0.1" value={job.customPlateW} onChange={e => setJ("customPlateW", Number(e.target.value))} />
+                      <label className={LBL}>Plate width ({dimUnit})</label>
+                      <DimensionInput className={INP} value={job.customPlateW} baseUnit="in" displayUnit={dimUnit} onChange={v => setJ("customPlateW", v)} />
                     </div>
                     <div>
-                      <label className={LBL}>Plate height (in)</label>
-                      <input className={INP} type="number" step="0.1" value={job.customPlateH} onChange={e => setJ("customPlateH", Number(e.target.value))} />
+                      <label className={LBL}>Plate height ({dimUnit})</label>
+                      <DimensionInput className={INP} value={job.customPlateH} baseUnit="in" displayUnit={dimUnit} onChange={v => setJ("customPlateH", v)} />
                     </div>
                   </div>
                 )}
@@ -865,114 +834,27 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                 <div style={{ fontSize: 11, color: "#666", marginTop: 3 }}>
                   {job.clientName && <span>Client: <b>{job.clientName}</b> &middot; </span>}
                   {job.numPages} pages &middot; {job.colours === "1" ? "1 colour" : job.colours === "4" ? "Full colour" : "2 colours"} &middot;{" "}
-                  {BOOK_SIZES[job.bookSize]?.label || `${job.bookW}"×${job.bookH}"`} &middot; {resolveSheet(job)?.label} &middot;{" "}
+                  {offsetBookLabel(job, dimUnit)} &middot; {offsetSheetLabel(resolveSheet(job), dimUnit)} &middot;{" "}
                   {BINDING_TYPES.find(b => b.value === job.bindingType)?.label}
                   {job.hasCover && ` · Cover: ${LAM_TYPES.find(l => l.value === job.laminationType)?.label || "No lam."}`}
                 </div>
               </div>
 
-              <CostBar r={results[resultQtys[0]]} qty={resultQtys[0]} />
-
-              <div style={{ overflowX: "auto" }}>
-                <table className="quote-table" style={S.tbl}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...S.th, ...S.thF }}>Item</th>
-                      {resultQtys.map(q => <th key={q} style={S.th}>{q.toLocaleString()} copies</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="desc-row">
-                      <td colSpan={resultQtys.length + 1} style={{ ...S.tdF, paddingBottom: 14, borderBottom: "1px solid #E0D9CF" }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "#1C1C1E", marginBottom: 4 }}>{job.jobTitle || "Printing Services"}</div>
-                        <div style={{ fontSize: 11, color: "#555", lineHeight: "1.7" }}>
-                          {job.numPages}-page &middot; {job.colours === "1" ? "1 colour" : job.colours === "4" ? "Full colour" : `${job.colours} colours`} &middot;{" "}
-                          {BOOK_SIZES[job.bookSize]?.label || `${job.bookW}"×${job.bookH}"`} &middot; {resolveSheet(job)?.label} &middot;{" "}
-                          {BINDING_TYPES.find(b => b.value === job.bindingType)?.label}
-                          {job.hasCover && " · With separate cover"}
-                          {job.hasCover && job.laminationType !== "none" && ` (${LAM_TYPES.find(l => l.value === job.laminationType)?.label} lamination)`}
-                        </div>
-                      </td>
-                    </tr>
-                    <tr className="spec-row">
-                      <td style={S.tdF}>Sepos &amp; Plates <span style={S.pill("#555")}>{results[resultQtys[0]]?.numPlates} plates</span></td>
-                      {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.plateCost)}</td>)}
-                    </tr>
-                    <tr className="spec-row">
-                      <td style={S.tdF}>Paper {resultQtys.map(q => <span key={q} style={{ ...S.pill("#E67E22"), marginRight: 3 }}>{results[q]?.paper?.reamsNeeded} rms</span>)}</td>
-                      {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.paperCost)}</td>)}
-                    </tr>
-                    <tr className="spec-row">
-                      <td style={S.tdF}>Impressions <span style={S.pill("#2980B9")}>{results[resultQtys[0]]?.impressions} impr.</span></td>
-                      {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.impressionCost)}</td>)}
-                    </tr>
-                    {job.hasCover && <>
-                      <tr className="spec-row">
-                        <td style={S.tdF}>Cover &mdash; Plates</td>
-                        {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.coverPlateCost)}</td>)}
-                      </tr>
-                      <tr className="spec-row">
-                        <td style={S.tdF}>Cover &mdash; Impressions <span style={S.pill("#2980B9")}>{job.coverColours} clrs</span></td>
-                        {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.coverImpressionCost)}</td>)}
-                      </tr>
-                      <tr className="spec-row">
-                        <td style={S.tdF}>Cover &mdash; Paper {resultQtys.map(q => <span key={q} style={{ ...S.pill("#8E44AD"), marginRight: 3 }}>{results[q]?.coverPaper?.reamsNeeded} rms</span>)}</td>
-                        {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.coverPaperCost)}</td>)}
-                      </tr>
-                      {job.laminationType !== "none" && (
-                        <tr className="spec-row">
-                          <td style={S.tdF}>Lamination <span style={S.pill("#8E44AD")}>{LAM_TYPES.find(l => l.value === job.laminationType)?.label}</span></td>
-                          {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.coverLamCost)}</td>)}
-                        </tr>
-                      )}
-                    </>}
-                    <tr className="spec-row"><td style={S.tdF}>Fold &amp; Collate</td>{resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.foldCost)}</td>)}</tr>
-                    <tr className="spec-row"><td style={S.tdF}>Trimming</td>{resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.trimCost)}</td>)}</tr>
-                    <tr className="spec-row">
-                      <td style={S.tdF}>Binding <span style={S.pill("#27AE60")}>{BINDING_TYPES.find(b => b.value === job.bindingType)?.label}</span></td>
-                      {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.bindingCost)}</td>)}
-                    </tr>
-                    <tr className="subtotal-row spec-row">
-                      <td style={{ ...S.tdF, ...S.tdSub }}>Subtotal</td>
-                      {resultQtys.map(q => <td key={q} style={{ ...S.td, ...S.tdSub }}>{GHS(results[q]?.subtotal)}</td>)}
-                    </tr>
-                    <tr className="spec-row">
-                      <td style={S.tdF}>Profit margin ({rates.profitMargin}%)</td>
-                      {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.margin)}</td>)}
-                    </tr>
-                    <tr className="subtotal-row spec-row">
-                      <td style={{ ...S.tdF, ...S.tdSub }}>Total before VAT</td>
-                      {resultQtys.map(q => <td key={q} style={{ ...S.td, ...S.tdSub }}>{GHS(results[q]?.beforeVAT)}</td>)}
-                    </tr>
-                    {job.applyVAT && (
-                      <tr>
-                        <td style={S.tdF}>VAT @ 20% (VAT + NHIL + GETFund)</td>
-                        {resultQtys.map(q => <td key={q} style={S.td}>{GHS(results[q]?.vatAmt)}</td>)}
-                      </tr>
-                    )}
-                    <tr className="grand-row">
-                      <td style={{ ...S.tdF, fontWeight: 800, fontSize: 13, color: "#C0392B" }}>GRAND TOTAL</td>
-                      {resultQtys.map(q => <td key={q} style={{ ...S.td, ...S.tdGrand }}>{GHS(results[q]?.grandTotal)}</td>)}
-                    </tr>
-                    <tr className="grand-row">
-                      <td style={{ ...S.tdF, fontWeight: 800, fontSize: 13, color: "#C0392B" }}>
-                        UNIT PRICE <span style={{ fontSize: 10, fontWeight: 400, color: "#999" }}>per copy{parseInt(job.overs) > 0 ? ` · incl. ${parseInt(job.overs).toLocaleString()} overs` : ""}</span>
-                      </td>
-                      {resultQtys.map(q => <td key={q} style={{ ...S.td, ...S.tdGrand, fontSize: 16 }}>{GHS(results[q]?.unitPrice)}</td>)}
-                    </tr>
-                    <tr style={{ borderTop: "2px solid #E0D9CF" }}>
-                      <td style={{ ...S.tdF, fontWeight: 700, color: "#1C1C1E", paddingTop: 10 }}>
-                        Deposit required (60%) <span style={{ fontSize: 9, fontWeight: 400, color: "#AAA", marginLeft: 6 }}>payable before production</span>
-                      </td>
-                      {resultQtys.map(q => <td key={q} style={{ ...S.td, fontWeight: 700, color: "#1C1C1E", paddingTop: 10 }}>{GHS((results[q]?.grandTotal ?? 0) * 0.6)}</td>)}
-                    </tr>
-                    <tr>
-                      <td style={{ ...S.tdF, color: "#666" }}>Balance on delivery</td>
-                      {resultQtys.map(q => <td key={q} style={{ ...S.td, color: "#666" }}>{GHS((results[q]?.grandTotal ?? 0) * 0.4)}</td>)}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <OffsetQuoteBreakdown job={job} rates={rates} results={results} resultQtys={resultQtys}
+                descRow={
+                  <tr className="desc-row">
+                    <td colSpan={resultQtys.length + 1} style={{ textAlign: "left", fontFamily: "inherit", fontSize: 11, color: "#666", paddingBottom: 14, borderBottom: "1px solid #E0D9CF" }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "#1C1C1E", marginBottom: 4 }}>{job.jobTitle || "Printing Services"}</div>
+                      <div style={{ fontSize: 11, color: "#555", lineHeight: "1.7" }}>
+                        {job.numPages}-page &middot; {job.colours === "1" ? "1 colour" : job.colours === "4" ? "Full colour" : `${job.colours} colours`} &middot;{" "}
+                        {offsetBookLabel(job, dimUnit)} &middot; {offsetSheetLabel(resolveSheet(job), dimUnit)} &middot;{" "}
+                        {BINDING_TYPES.find(b => b.value === job.bindingType)?.label}
+                        {job.hasCover && " · With separate cover"}
+                        {job.hasCover && job.laminationType !== "none" && ` (${LAM_TYPES.find(l => l.value === job.laminationType)?.label} lamination)`}
+                      </div>
+                    </td>
+                  </tr>
+                } />
 
               <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px solid #E0D9CF", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, fontSize: 10, color: "#999" }}>
                 <span>This quotation is valid for 14 days from the date of issue.</span>

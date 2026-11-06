@@ -1,4 +1,37 @@
+import { presetLabel, fmtDims } from "./units.js";
+
 export const DIGITAL_SHEET_NAMES = ['A3 Extra', 'A3', 'A4'];
+
+// Finished-size presets for digital jobs, in millimetres. The keys are stored
+// in saved quotes, so they never change; use digitalSizeLabel() for display.
+export const DIGITAL_SIZES = {
+  'A6 (105×148)':          [105, 148],
+  'DL (99×210)':           [99,  210],
+  'A5 (148×210)':          [148, 210],
+  'A4 (210×297)':          [210, 297],
+  'A3 (297×420)':          [297, 420],
+  'Business card (90×55)': [90,   55],
+  'A4 flat (297×210)':     [297, 210],
+  'A3 flat (420×297)':     [420, 297],
+  'Custom':                null,
+};
+
+// Size of a saved digital job for spec sheets / invoice lines, in the unit the
+// quote was made in: "A5 (148mm × 210mm)", "Custom (10cm × 15cm)", "6ft × 3ft".
+export function digitalJobSizeLabel(j = {}) {
+  if (j.jobType === 'banner' || j.jobType === 'sticker') return `${j.lfWidth}${j.lfUnit} × ${j.lfHeight}${j.lfUnit}`;
+  const unit = j.dimUnit || 'mm';
+  if (j.sizeKey === 'Custom') return `Custom (${fmtDims(j.customW, j.customH, 'mm', unit)})`;
+  return digitalSizeLabel(j.sizeKey, unit);
+}
+
+// "A5 (148mm × 210mm)" — preset name with its size in the chosen unit.
+export function digitalSizeLabel(key, unit = 'mm') {
+  if (key === 'Custom') return 'Custom size';
+  const dims = DIGITAL_SIZES[key];
+  const name = String(key).split(' (')[0];
+  return dims ? presetLabel(name, dims[0], dims[1], 'mm', unit) : String(key ?? '');
+}
 
 export const DIGITAL_STOCK_NAMES = [
   '80gsm Bond',
@@ -35,6 +68,12 @@ export const DEFAULT_DIGITAL_RATES = {
       'Reflective vinyl': 25,
     },
   },
+  // Lamination cost per parent sheet, per laminated side (GH₵)
+  lamination: {
+    'Gloss':               { 'A3 Extra': 2.50, 'A3': 2.20, 'A4': 1.20 },
+    'Matt':                { 'A3 Extra': 2.50, 'A3': 2.20, 'A4': 1.20 },
+    'Soft-touch (velvet)': { 'A3 Extra': 4.00, 'A3': 3.50, 'A4': 1.90 },
+  },
   bind: {
     'None': 0,
     'Saddle stitch': 0.8,
@@ -55,3 +94,17 @@ export const DEFAULT_DIGITAL_RATES = {
   lfMarkup:   40,   // large-format markup % (on top of material cost)
   areaUnit:   'sqft', // 'sqft' | 'sqm'
 };
+
+// Lamination options shown in the quoters ('None' is not stored in rates)
+export const LAMINATION_NONE = 'None';
+
+export function laminationOptions(rates) {
+  return [LAMINATION_NONE, ...Object.keys(rates?.lamination || {})];
+}
+
+// Cost to laminate `sheets` parent sheets of `sheetName` on `sides` sides.
+export function laminationCost(type, sheetName, sheets, sides, rates) {
+  if (!type || type === LAMINATION_NONE || !sheets || !sides) return 0;
+  const rate = (rates?.lamination?.[type] || {})[sheetName] || 0;
+  return sheets * sides * rate;
+}

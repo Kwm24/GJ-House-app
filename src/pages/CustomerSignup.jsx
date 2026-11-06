@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { signUpCustomer } from "../lib/auth.js";
+import { signUpCustomer, getProfile, signOut } from "../lib/auth.js";
+import { getRouteForRole } from "../lib/routes.js";
+import { useAuth } from "../components/AuthProvider.jsx";
+import { GoogleSignIn, OrDivider } from "../components/GoogleSignIn.jsx";
 
 export function CustomerSignup() {
   const navigate = useNavigate();
+  const { setProfile } = useAuth();
   const [form, setForm] = useState({
     fullName: "", phone: "", email: "", password: "", confirm: "",
   });
@@ -13,6 +17,25 @@ export function CustomerSignup() {
 
   function set(field) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  }
+
+  // Google: the account (customer profile) is created on first sign-in,
+  // so go straight into the portal
+  async function handleGoogle(user) {
+    setError("");
+    try {
+      const profile = await getProfile(user.id);
+      if (!profile?.role) { setError("Your account was created but has no profile yet. Please try signing in."); return; }
+      if (profile.is_active === false) {
+        await signOut();
+        setError("This account has been deactivated. Contact us for help.");
+        return;
+      }
+      setProfile(profile);
+      navigate(getRouteForRole(profile.role), { replace: true });
+    } catch (err) {
+      setError(err.message ?? "Could not sign up with Google.");
+    }
   }
 
   async function handleSubmit(e) {
@@ -91,6 +114,9 @@ export function CustomerSignup() {
             {error}
           </div>
         )}
+
+        <GoogleSignIn mode="signup" onSignedIn={handleGoogle} onError={setError} />
+        <OrDivider />
 
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1.5">

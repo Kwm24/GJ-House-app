@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getSettings, updateSettings, uploadCompanyLogo, uploadQuoterThumbnail } from "../../lib/settings.js";
 import { DEFAULT_RATES, RATE_GROUPS } from "../../lib/printSpecs.js";
-import { DEFAULT_DIGITAL_RATES, DIGITAL_SHEET_NAMES, DIGITAL_STOCK_NAMES } from "../../lib/digitalPrintSpecs.js";
+import { LoginBackgroundSettings } from "./LoginBackgroundSettings.jsx";
+import { DigitalRatesEditor } from "../DigitalRatesEditor.jsx";
 import { applyAccentHex } from "../AccentColorInjector.jsx";
 
 const inputClass =
@@ -37,9 +38,6 @@ export function SettingsTab() {
   const [savingRates, setSavingRates] = useState(false);
   const [ratesMsg, setRatesMsg] = useState("");
 
-  const [dRates, setDRates] = useState(structuredClone(DEFAULT_DIGITAL_RATES));
-  const [savingDRates, setSavingDRates] = useState(false);
-  const [dRatesMsg, setDRatesMsg] = useState("");
 
   const [accentColor, setAccentColor] = useState("#C0392B");
   const [savingBranding, setSavingBranding] = useState(false);
@@ -68,9 +66,6 @@ export function SettingsTab() {
         setAccountNumber(data.account_number || "");
         setAccountName(data.account_name || "");
         setRates({ ...DEFAULT_RATES, ...(data.quote_rates || {}) });
-        if (data.digital_quote_rates) {
-          setDRates((r) => deepMergeSettings(r, data.digital_quote_rates));
-        }
         setAccentColor(data.accent_color || "#C0392B");
         setQuoterThumbnails(data.instant_quoter_thumbnails || {});
       }
@@ -89,34 +84,7 @@ export function SettingsTab() {
     setRates((r) => ({ ...r, [key]: Number(value) }));
   }
 
-  function setDSheetRate(sheet, field, value) {
-    setDRates((r) => ({ ...r, sheets: { ...r.sheets, [sheet]: { ...r.sheets[sheet], [field]: Number(value) } } }));
-  }
-  function setDStockRate(stock, sheet, value) {
-    setDRates((r) => ({ ...r, stocks: { ...r.stocks, [stock]: { ...r.stocks[stock], [sheet]: Number(value) } } }));
-  }
-  function setDGlobal(key, value) {
-    setDRates((r) => ({ ...r, [key]: typeof r[key] === 'number' ? Number(value) : value }));
-  }
-  function setDLfRate(type, mat, value) {
-    setDRates((r) => ({ ...r, lf: { ...r.lf, [type]: { ...r.lf[type], [mat]: Number(value) } } }));
-  }
-  function setDBind(name, value) {
-    setDRates((r) => ({ ...r, bind: { ...r.bind, [name]: Number(value) } }));
-  }
 
-  async function handleSaveDigitalRates() {
-    setSavingDRates(true);
-    setDRatesMsg("");
-    try {
-      await updateSettings({ digital_quote_rates: dRates });
-      setDRatesMsg("Digital print rates saved.");
-    } catch (err) {
-      setDRatesMsg(err.message ?? "Could not save digital rates.");
-    } finally {
-      setSavingDRates(false);
-    }
-  }
 
   async function handleLogoUpload(file) {
     if (!file) return;
@@ -578,153 +546,17 @@ export function SettingsTab() {
         </div>
       </div>
 
-      {/* ── Digital print rates ── */}
+      {/* ── Login background ── */}
+      <LoginBackgroundSettings />
+
+      {/* ── Digital print rates (shared editor — also used by the Production rates account) ── */}
+      <DigitalRatesEditor />
+
+      {/* ── Live Quote thumbnails ── */}
       <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
-        <h2 className="text-lg sm:text-xl font-semibold text-brand-dark">Digital print rate defaults</h2>
-        <p className="mt-1 text-sm text-gray-600">Costs used by the Digital Print Quoter. All amounts in GH₵.</p>
-
-        {dRatesMsg && (
-          <div role="status" className={`mt-4 rounded-lg border px-4 py-3 text-sm ${dRatesMsg.includes("saved") ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-800"}`}>
-            {dRatesMsg}
-          </div>
-        )}
-
-        {/* Print cost per parent sheet */}
-        <h3 className="mt-5 text-xs font-semibold uppercase tracking-wide text-brand-red border-b border-gray-300 pb-1.5 mb-3">Print cost per parent sheet (GH₵)</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr>
-                <th className="text-left py-2 px-2 text-xs font-medium text-gray-500">Sheet</th>
-                <th className="text-right py-2 px-2 text-xs font-medium text-gray-500">Single-sided</th>
-                <th className="text-right py-2 px-2 text-xs font-medium text-gray-500">Double-sided</th>
-              </tr>
-            </thead>
-            <tbody>
-              {DIGITAL_SHEET_NAMES.map((name) => (
-                <tr key={name} className="border-t border-gray-200">
-                  <td className="py-2 px-2 text-sm font-medium text-brand-dark">{name}</td>
-                  {['p1', 'p2'].map((f) => (
-                    <td key={f} className="py-2 px-2">
-                      <input
-                        type="number" step="0.01" min="0"
-                        value={dRates.sheets[name]?.[f] ?? 0}
-                        onChange={(e) => setDSheetRate(name, f, e.target.value)}
-                        className={inputClass}
-                        style={{ maxWidth: 90 }}
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Paper cost per stock per sheet */}
-        <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-brand-red border-b border-gray-300 pb-1.5 mb-3">Paper cost per parent sheet by stock (GH₵)</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr>
-                <th className="text-left py-2 px-2 text-xs font-medium text-gray-500">Stock</th>
-                {DIGITAL_SHEET_NAMES.map((n) => (
-                  <th key={n} className="text-right py-2 px-2 text-xs font-medium text-gray-500">{n}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {DIGITAL_STOCK_NAMES.map((stock) => (
-                <tr key={stock} className="border-t border-gray-200">
-                  <td className="py-2 px-2 text-sm font-medium text-brand-dark">{stock}</td>
-                  {DIGITAL_SHEET_NAMES.map((sheet) => (
-                    <td key={sheet} className="py-2 px-2">
-                      <input
-                        type="number" step="0.01" min="0"
-                        value={dRates.stocks[stock]?.[sheet] ?? 0}
-                        onChange={(e) => setDStockRate(stock, sheet, e.target.value)}
-                        className={inputClass}
-                        style={{ maxWidth: 80 }}
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Binding rates */}
-        <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-brand-red border-b border-gray-300 pb-1.5 mb-3">Binding (per copy, GH₵)</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {Object.keys(dRates.bind).filter((b) => b !== 'None').map((name) => (
-            <div key={name}>
-              <label className="block text-xs font-medium text-gray-600 mb-1.5">{name}</label>
-              <input type="number" step="0.01" min="0" value={dRates.bind[name]} onChange={(e) => setDBind(name, e.target.value)} className={inputClass} />
-            </div>
-          ))}
-        </div>
-
-        {/* Large format rates */}
-        <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-brand-red border-b border-gray-300 pb-1.5 mb-3">Banner rates (per sq ft)</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {Object.keys(dRates.lf.banner).map((mat) => (
-            <div key={mat}>
-              <label className="block text-xs font-medium text-gray-600 mb-1.5">{mat}</label>
-              <input type="number" step="0.01" min="0" value={dRates.lf.banner[mat]} onChange={(e) => setDLfRate('banner', mat, e.target.value)} className={inputClass} />
-            </div>
-          ))}
-        </div>
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-brand-red border-b border-gray-300 pb-1.5 mb-3">Sticker rates (per sq ft)</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {Object.keys(dRates.lf.sticker).map((mat) => (
-            <div key={mat}>
-              <label className="block text-xs font-medium text-gray-600 mb-1.5">{mat}</label>
-              <input type="number" step="0.01" min="0" value={dRates.lf.sticker[mat]} onChange={(e) => setDLfRate('sticker', mat, e.target.value)} className={inputClass} />
-            </div>
-          ))}
-        </div>
-
-        {/* Global settings */}
-        <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-brand-red border-b border-gray-300 pb-1.5 mb-3">Global settings</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {[
-            { key: 'margin',     label: 'Non-print margin (mm)' },
-            { key: 'gutter',     label: 'Gap between pieces (mm)' },
-            { key: 'wasteFixed', label: 'Fixed waste sheets' },
-            { key: 'wastePct',   label: 'Extra waste (%)' },
-            { key: 'markup',     label: 'Markup (%)' },
-            { key: 'setup',      label: 'Setup fee (GH₵)' },
-            { key: 'fold',       label: 'Folding per copy (GH₵)' },
-            { key: 'bannerFin',  label: 'Banner hem & eyelets (GH₵)' },
-            { key: 'stickerCut', label: 'Sticker cutting (GH₵)' },
-            { key: 'lfMin',      label: 'Min. banner/sticker charge (GH₵)' },
-            { key: 'lfMarkup',   label: 'Banner/sticker markup (%)' },
-          ].map(({ key, label }) => (
-            <div key={key}>
-              <label className="block text-xs font-medium text-gray-600 mb-1.5">{label}</label>
-              <input type="number" step="0.01" min="0" value={dRates[key] ?? 0} onChange={(e) => setDGlobal(key, e.target.value)} className={inputClass} />
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-5 flex flex-wrap gap-3">
-          <button type="button" onClick={() => setDRates(structuredClone(DEFAULT_DIGITAL_RATES))}
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
-            Reset to defaults
-          </button>
-          <button type="button" onClick={handleSaveDigitalRates} disabled={savingDRates}
-            className="rounded-lg bg-brand-red text-white text-sm font-semibold px-4 py-2.5 hover:bg-brand-red/90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
-            {savingDRates ? "Saving…" : "Save digital rates"}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Instant Quoter thumbnails ── */}
-      <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
-        <h2 className="text-lg sm:text-xl font-semibold text-brand-dark">Instant Quoter — Job Type Images</h2>
+        <h2 className="text-lg sm:text-xl font-semibold text-brand-dark">Live Quote: Job Type Images</h2>
         <p className="mt-1 text-sm text-gray-600 mb-5">
-          Thumbnail images shown on the Instant Quoter (landing page &amp; customer portal). Square images work best.
+          Thumbnail images shown on the Live Quote (landing page &amp; customer portal). Square images work best.
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
@@ -780,16 +612,4 @@ export function SettingsTab() {
       </div>
     </div>
   );
-}
-
-function deepMergeSettings(target, source) {
-  const out = { ...target };
-  for (const k of Object.keys(source)) {
-    if (source[k] !== null && typeof source[k] === 'object' && !Array.isArray(source[k])) {
-      out[k] = deepMergeSettings(target[k] || {}, source[k]);
-    } else {
-      out[k] = source[k];
-    }
-  }
-  return out;
 }

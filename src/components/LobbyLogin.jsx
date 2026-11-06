@@ -9,6 +9,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { signInWithEmail, getProfile, signOut } from "../lib/auth.js";
 import { useAuth } from "./AuthProvider.jsx";
 import { LoadingScreen } from "./LoadingScreen.jsx";
+import { LoginBackdrop } from "./LoginBackdrop.jsx";
 
 export function LobbyLogin({ icon, title, subtitle, requiredRole, lobbyPath, signupPath }) {
   const navigate  = useNavigate();
@@ -64,7 +65,9 @@ export function LobbyLogin({ icon, title, subtitle, requiredRole, lobbyPath, sig
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12" style={{ background: "linear-gradient(135deg, #1C1C1E 0%, #111113 60%, #1a1020 100%)" }}>
+    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12 relative" style={{ background: "linear-gradient(135deg, #1C1C1E 0%, #111113 60%, #1a1020 100%)" }}>
+
+      <LoginBackdrop />
 
       {/* Subtle dot grid */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.04]" aria-hidden="true"

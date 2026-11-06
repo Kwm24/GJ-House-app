@@ -5,7 +5,7 @@
  * custom size. Drop-in replacement for the old static "Parent sheet"
  * <select> in PrintQuoteGH.jsx.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_PARENT_SHEET_CATALOG,
   PRINT_ORIENTATIONS,
@@ -13,6 +13,9 @@ import {
   evaluateSheetOption,
 } from "../lib/imposition.js";
 import SheetLayoutSVG from "./SheetLayoutSVG.jsx";
+import { DimensionInput } from "./DimensionInput.jsx";
+import { offsetSheetLabel } from "../lib/printSpecs.js";
+import { fmtDims } from "../lib/units.js";
 
 const GHS = (n) =>
   "GH₵ " +
@@ -29,17 +32,32 @@ export default function ImpositionAdvisor({
   qty,
   rates,
   value,                // currently selected key, or "custom"
-  onSelect,             // (key) => void  |  ("custom", { w, h }) => void
+  onSelect,             // (key) => void  |  ("custom", { w, h, baseSheet, sheetsPerBase }) => void
+  customSheet = null,   // saved custom sheet { w, h, baseSheet, sheetsPerBase } — restores the custom panel on load
   orientation = "portrait",       // "portrait" | "landscape" — book PAGE orientation on sheet
   onOrientationChange,            // (orientation) => void
   sheetOrientation = "portrait",  // "portrait" | "landscape" — the PARENT SHEET's own orientation
   onSheetOrientationChange,       // (sheetOrientation) => void
   catalog = DEFAULT_PARENT_SHEET_CATALOG,
+  unit = "in",                    // display unit; sizes stay in inches
 }) {
+  const isCustom = value === "custom" && !!customSheet;
   const [customOpen, setCustomOpen] = useState(value === "custom");
-  const [customW, setCustomW] = useState(25);
-  const [customH, setCustomH] = useState(38);
-  const [customBaseKey, setCustomBaseKey] = useState("standard");
+  const [customW, setCustomW] = useState(isCustom ? customSheet.w : 25);
+  const [customH, setCustomH] = useState(isCustom ? customSheet.h : 38);
+  const [customBaseKey, setCustomBaseKey] = useState((isCustom && customSheet.baseSheet) || "standard");
+
+  // When a saved quote loads (or the parent's custom sheet changes), show the
+  // custom panel with the saved size instead of the 25×38 defaults.
+  const savedW = customSheet?.w, savedH = customSheet?.h, savedBase = customSheet?.baseSheet;
+  useEffect(() => {
+    if (value !== "custom" || savedW == null || savedH == null) return;
+    setCustomOpen(true);
+    // Keep the user's in-progress text (e.g. "25.") when it already equals the saved number
+    setCustomW((cur) => (Number(cur) === Number(savedW) ? cur : savedW));
+    setCustomH((cur) => (Number(cur) === Number(savedH) ? cur : savedH));
+    setCustomBaseKey(savedBase || "standard");
+  }, [value, savedW, savedH, savedBase]);
 
   const options = useMemo(
     () => suggestBestParentSheet({ bookW, bookH, numPages, colours, qty, rates, bindingType, orientation, sheetOrientation, catalog }),
@@ -50,14 +68,7 @@ export default function ImpositionAdvisor({
     if (!customOpen || !customW || !customH) return null;
     const cW = Number(customW), cH = Number(customH);
     const base = catalog[customBaseKey] || catalog.standard;
-    let sheetsPerBase = 1;
-    if (base && cW > 0 && cH > 0) {
-      const { w: bW, h: bH } = base;
-      sheetsPerBase = Math.max(1,
-        Math.floor(bW / cW) * Math.floor(bH / cH),
-        Math.floor(bW / cH) * Math.floor(bH / cW),
-      );
-    }
+    const sheetsPerBase = calcSheetsPerBase(base, cW, cH);
     const result = evaluateSheetOption({
       key: "custom",
       sheet: { w: cW, h: cH, label: `Custom (${cW}×${cH}")` },
@@ -78,6 +89,24 @@ export default function ImpositionAdvisor({
       parentSheetsPerBaseSheet: sheetsPerBase,
     };
   }, [customOpen, customW, customH, customBaseKey, bookW, bookH, numPages, colours, qty, rates, bindingType, orientation, sheetOrientation, catalog]);
+
+  // If the custom sheet is the selected one, push edits straight to the quote
+  // so what's saved always matches what's on screen.
+  function editCustom(next) {
+    const w    = next.w    ?? customW;
+    const h    = next.h    ?? customH;
+    const base = next.base ?? customBaseKey;
+    if (next.w    !== undefined) setCustomW(w);
+    if (next.h    !== undefined) setCustomH(h);
+    if (next.base !== undefined) setCustomBaseKey(base);
+    const nW = Number(w), nH = Number(h);
+    if (value === "custom" && nW > 0 && nH > 0) {
+      onSelect("custom", {
+        w: nW, h: nH, baseSheet: base,
+        sheetsPerBase: calcSheetsPerBase(catalog[base] || catalog.standard, nW, nH),
+      });
+    }
+  }
 
   if (!bookW || !bookH || !numPages) {
     return <p style={S.hint}>Enter book size and page count to see parent sheet suggestions.</p>;
@@ -143,7 +172,7 @@ export default function ImpositionAdvisor({
             >
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#1C1C1E" }}>
-                  {opt.sheet.label}
+                  {offsetSheetLabel(opt.sheet, unit)}
                   {isBest && <span style={S.pill("#27AE60")}>Recommended</span>}
                   {opt.rotated && <span style={S.pill("#888")}>page: landscape</span>}
                   {opt.sheetOrientation === "landscape" && <span style={S.pill("#5A6B8C")}>sheet: landscape</span>}
@@ -174,24 +203,26 @@ export default function ImpositionAdvisor({
           {customOpen && (
             <div style={{ marginTop: 10 }}>
               <div style={{ display: "flex", gap: 10 }}>
-                <input type="number" step="0.1" value={customW} onChange={(e) => setCustomW(e.target.value)} placeholder='Width (in)' style={S.inp} />
-                <input type="number" step="0.1" value={customH} onChange={(e) => setCustomH(e.target.value)} placeholder='Height (in)' style={S.inp} />
+                <DimensionInput value={customW} baseUnit="in" displayUnit={unit} onChange={(v) => editCustom({ w: v })}
+                  placeholder={`Width (${unit})`} aria-label={`Custom sheet width (${unit})`} style={S.inp} />
+                <DimensionInput value={customH} baseUnit="in" displayUnit={unit} onChange={(v) => editCustom({ h: v })}
+                  placeholder={`Height (${unit})`} aria-label={`Custom sheet height (${unit})`} style={S.inp} />
               </div>
               <div style={{ marginTop: 8 }}>
                 <label style={{ ...S.lbl, marginBottom: 4 }}>Base ream sheet (custom sheet is cut from this)</label>
                 <select
                   value={customBaseKey}
-                  onChange={(e) => setCustomBaseKey(e.target.value)}
+                  onChange={(e) => editCustom({ base: e.target.value })}
                   style={{ ...S.inp, padding: "6px 10px", fontSize: 12 }}
                 >
                   {Object.entries(catalog).map(([k, v]) => (
-                    <option key={k} value={k}>{v.label}</option>
+                    <option key={k} value={k}>{offsetSheetLabel(v, unit)}</option>
                   ))}
                 </select>
                 {customResult?.parentSheetsPerBaseSheet > 1 && (
                   <p style={{ ...S.hint, marginTop: 4 }}>
                     {customResult.parentSheetsPerBaseSheet} custom sheets cut per{" "}
-                    {catalog[customBaseKey]?.w}×{catalog[customBaseKey]?.h}" ream sheet
+                    {fmtDims(catalog[customBaseKey]?.w, catalog[customBaseKey]?.h, "in", unit)} ream sheet
                     → 1 ream = {(500 * customResult.parentSheetsPerBaseSheet).toLocaleString()} usable parent sheets
                   </p>
                 )}
@@ -243,6 +274,16 @@ export default function ImpositionAdvisor({
         </div>
       )}
     </div>
+  );
+}
+
+// How many custom parent sheets can be cut from one base ream sheet.
+function calcSheetsPerBase(base, cW, cH) {
+  if (!base || !(cW > 0) || !(cH > 0)) return 1;
+  const { w: bW, h: bH } = base;
+  return Math.max(1,
+    Math.floor(bW / cW) * Math.floor(bH / cH),
+    Math.floor(bW / cH) * Math.floor(bH / cW),
   );
 }
 

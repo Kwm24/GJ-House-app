@@ -22,6 +22,25 @@ export async function setProfileActive(profileId, isActive) {
   return data;
 }
 
+// Production accounts allowed to edit Digital Print Quoter rates (migration 037).
+// Fetched separately so the Users tab still loads if 037 hasn't been run.
+export async function listRatesEditorIds() {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("can_edit_digital_rates", true);
+  if (error) return null;   // column missing → feature not set up yet
+  return new Set((data ?? []).map((r) => r.id));
+}
+
+export async function setRatesPermission(profileId, allowed) {
+  const { error } = await supabase
+    .from("profiles")
+    .update({ can_edit_digital_rates: allowed })
+    .eq("id", profileId);
+  if (error) throw error;
+}
+
 // Calls the admin-create-user Edge Function, which uses the service-role
 // key server-side to invite the user via Supabase Auth and create their
 // profile row -- the service-role key must never live in client code.

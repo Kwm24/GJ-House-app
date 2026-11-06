@@ -7,7 +7,7 @@
  * Supports:
  *  - Company logo (top-left of print header)
  *  - Accent colour (from admin settings) used in print CSS
- *  - Import line-items from a saved print quote (localStorage)
+ *  - Saved offset/digital print quotes added as print line items (several per invoice)
  */
 import { useState, useMemo, useEffect } from "react";
 import { useAuth } from "../AuthProvider.jsx";
@@ -17,10 +17,14 @@ import {
 } from "../../lib/invoices.js";
 import { loadSavedQuotes, loadDigitalQuotes } from "../../lib/quoteStorage.js";
 import { buildDigitalSpecSummary } from "../DigitalPrintQuoteGH.jsx";
+import { snapshotForLine } from "../../lib/quoteLines.js";
+import { digitalJobSizeLabel } from "../../lib/digitalPrintSpecs.js";
+import { offsetBookLabel } from "../../lib/printSpecs.js";
 // Note: createJobFromInvoice is now called by Accounts (PaymentsTab) when they
 // record payment — CS no longer marks invoices as paid directly.
 import { formatGHS as GHS } from "../../lib/currency.js";
 import { CustomerPicker } from "../CustomerPicker.jsx";
+import { QuotePicker } from "./QuotePicker.jsx";
 
 const VAT_RATE = 0.20;
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -216,11 +220,18 @@ function buildPrintHtml(state, company) {
 }
 
 // ─── Build a one-line spec summary from a saved print-quote snapshot ──────────
+function offsetSizeLabel(j) {
+  // In the unit the quote was made in: "A5 (148.1mm × 210.1mm)"
+  return offsetBookLabel(j, j.dimUnit || "in");
+}
+
+function digitalSizeLabel(j) {
+  return digitalJobSizeLabel(j);
+}
+
 function buildSpecSummary(snap) {
   const j = snap.job || {};
-  const sz = j.bookSize === "custom"
-    ? `${j.bookW}″×${j.bookH}″`
-    : (j.bookSize || "");
+  const sz = offsetSizeLabel(j);
   const pages = j.numPages ? `${j.numPages}pp` : "";
   const body  = j.colours === "4" ? "FC body" : `${j.colours || "1"}C body`;
   const cover = j.hasCover
@@ -228,6 +239,121 @@ function buildSpecSummary(snap) {
     : "";
   const binding = j.bindingType ? `, ${j.bindingType} bound` : "";
   return [sz, pages, body + cover + binding].filter(Boolean).join(" · ");
+}
+
+// ─── Saved quotes as "print items" ────────────────────────────────────────────
+// A saved offset/digital quote is offered in the line-item picker like a
+// catalogue item. It is never stored in the Items catalogue: the line simply
+// carries the quote's snapshot so Production gets the full spec.
+
+// Quantities an offset quote was priced at — prefer resultQtys, fall back to
+// results keys for quotes saved before resultQtys existed.
+function offsetQuoteQtys(snap) {
+  if (snap?.resultQtys?.length > 0) return snap.resultQtys.map(Number);
+  return Object.keys(snap?.results || {})
+    .map(Number)
+    .filter((n) => !isNaN(n) && n > 0)
+    .sort((a, b) => a - b);
+}
+
+// Price for one offset quantity. Uses the before-VAT figure so the invoice's
+// own VAT toggle stays accurate.
+function offsetPriceFor(snap, qtyNum) {
+  // JSON round-trip turns numeric keys to strings, so check both
+  const r = snap.results?.[qtyNum] ?? snap.results?.[String(qtyNum)];
+  if (!r) return null;
+  const qty = r.orderedQty ?? qtyNum;
+  const unitPrice = r.orderedQty > 0
+    ? round2((r.beforeVAT ?? r.grandTotal) / r.orderedQty)
+    : round2(r.unitPrice ?? 0);
+  return { qty, unitPrice };
+}
+
+// What goes in invoices.quote_snapshot (→ jobs.quote when the job is created).
+// Quote snapshots hold costs and profit, so they live ONLY here (staff-facing),
+// never on line_items, which are copied onto customer-visible receipts.
+//   exactly one quote line → that quote, so Production/Accounts work exactly as before
+//   several quote lines    → a "multi" bundle with every quote + the invoice total
+//   no quote lines         → the legacy invoice-level snapshot, if any
+function invoiceQuoteSnapshot(lines, legacy, meta) {
+  const quoteLines = lines.filter((li) => li.quoteSnapshot);
+  if (quoteLines.length === 1) return snapshotForLine(quoteLines[0]);
+  if (quoteLines.length > 1) {
+    return {
+      quoteType:   "multi",
+      ref:         meta.ref,
+      clientName:  meta.clientName,
+      clientPhone: meta.clientPhone,
+      jobTitle:    quoteLines.map((li) => li.name).join(" + "),
+      grandTotal:  meta.total,   // read by jobGrandTotal for Accounts/Admin figures
+      quotes: quoteLines.map((li) => ({
+        quoteRef:  li.quoteRef,
+        quoteType: li.quoteType,
+        quoteQty:  li.quoteQty ?? null,
+        name:      li.name,
+        snapshot:  snapshotForLine(li),
+      })),
+    };
+  }
+  return legacy || null;
+}
+
+// Re-attach each saved line's quote snapshot (stored at invoice level) when an
+// invoice is opened for editing.
+function rehydrateQuoteLines(lines, invoiceSnap) {
+  return lines.map((li) => {
+    if (!li.quoteRef || !invoiceSnap) return li;
+    const snapshot = invoiceSnap.quoteType === "multi"
+      ? invoiceSnap.quotes?.find((q) => q.quoteRef === li.quoteRef)?.snapshot
+      : (invoiceSnap.ref === li.quoteRef ? invoiceSnap : null);
+    return snapshot ? { ...li, quoteSnapshot: snapshot } : li;
+  });
+}
+
+const quoteOptionLabel = (q) => `${q.ref} · ${q.jobTitle || "Untitled"}`;
+
+// Build an invoice line from a saved quote. For offset quotes `qtyNum` picks
+// which priced quantity to use; digital quotes have a single quantity.
+function quoteToLine(snap, type, qtyNum) {
+  const common = {
+    _key:          crypto.randomUUID(),
+    itemId:        "",
+    unit:          "copy",
+    category:      "Print & Press",
+    itemType:      "print",
+    quoteRef:      snap.ref,
+    quoteType:     type,
+    quoteSnapshot: snap,
+  };
+
+  if (type === "offset") {
+    const quoteQty = qtyNum ?? offsetQuoteQtys(snap)[0];
+    const price    = offsetPriceFor(snap, quoteQty);
+    if (!price) return null;
+    const summary = buildSpecSummary(snap);
+    return {
+      ...common,
+      name:        snap.jobTitle || "Book printing",
+      description: `${summary} · Quote ${snap.ref}`,
+      quoteQty,    // the quote's results key (may differ from the ordered qty shown)
+      qty:         price.qty,
+      unitPrice:   price.unitPrice,
+      printSpecs:  { size: offsetSizeLabel(snap.job || {}), description: summary, quoteRef: snap.ref },
+    };
+  }
+
+  const res       = snap.result ?? {};
+  const summary   = res.description || buildDigitalSpecSummary(snap);
+  const qty       = Number(res.qty) || 1;
+  const sellPrice = Number(res.sellPrice) || 0;
+  return {
+    ...common,
+    name:        snap.jobTitle || "Digital print",
+    description: `${summary} · Quote ${snap.ref}`,
+    qty,
+    unitPrice:   qty > 0 ? round2(sellPrice / qty) : sellPrice,
+    printSpecs:  { size: digitalSizeLabel(snap.job || {}), description: summary, quoteRef: snap.ref },
+  };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -251,7 +377,8 @@ export default function InvoiceBuilder({
   const [dueDate,    setDueDate]    = useState(initial?.due_date ?? "");
   const [lineItems,  setLineItems]  = useState(
     initial?.line_items?.length
-      ? initial.line_items.map((li) => ({ ...li, _key: crypto.randomUUID() }))
+      ? rehydrateQuoteLines(initial.line_items, initial.quote_snapshot)
+          .map((li) => ({ ...li, _key: crypto.randomUUID() }))
       : [newLine()]
   );
   const [discountPct, setDiscountPct] = useState(Number(initial?.discount_pct ?? 0));
@@ -263,118 +390,61 @@ export default function InvoiceBuilder({
   // document appears in that customer's portal Documents tab.
   const [linkedCustomerId, setLinkedCustomerId] = useState(initial?.customer_id ?? null);
 
-  // Full PrintQuoteGH snapshot — preserved when CS imports from a saved quote so
-  // that the Production/Designer SpecSheet still has all the print figures even
-  // after the job is created from this invoice rather than directly from the quote.
-  const [importedQuoteSnapshot, setImportedQuoteSnapshot] = useState(
-    initial?.quote_snapshot ?? null
-  );
+  // Legacy: invoices made with the old one-quote import stored the snapshot only
+  // at invoice level and no line references it. Kept so re-saving them doesn't
+  // lose the Production spec.
+  const legacyQuoteSnapshot =
+    initial?.quote_snapshot && !(initial.line_items ?? []).some((li) => li.quoteRef)
+      ? initial.quote_snapshot
+      : null;
 
-  // ── Print-quote import (offset)
-  const [savedPrintQuotes, setSavedPrintQuotes] = useState([]);
-  const [importQuoteRef,   setImportQuoteRef]   = useState("");
-
-  // ── Digital quote import
-  const [savedDigitalQuotes,  setSavedDigitalQuotes]  = useState([]);
-  const [importDigitalRef,    setImportDigitalRef]    = useState("");
+  // ── Saved quotes offered as print items in the line-item picker
+  const [savedPrintQuotes,   setSavedPrintQuotes]   = useState([]);
+  const [savedDigitalQuotes, setSavedDigitalQuotes] = useState([]);
 
   useEffect(() => {
     loadSavedQuotes().then(setSavedPrintQuotes).catch(() => {});
     loadDigitalQuotes().then(setSavedDigitalQuotes).catch(() => {});
   }, []);
 
-  const selectedImportQuote = useMemo(
-    () => savedPrintQuotes.find((q) => q.ref === importQuoteRef) ?? null,
-    [savedPrintQuotes, importQuoteRef]
-  );
+  // label → { snap, type } for matching typed/datalist names
+  const quoteOptions = useMemo(() => {
+    const m = new Map();
+    savedPrintQuotes.forEach((q) => m.set(quoteOptionLabel(q), { snap: q, type: "offset" }));
+    savedDigitalQuotes.forEach((q) => m.set(quoteOptionLabel(q), { snap: q, type: "digital" }));
+    return m;
+  }, [savedPrintQuotes, savedDigitalQuotes]);
 
-  // Quantities available to import — prefer resultQtys, fall back to results
-  // object keys for quotes saved before the fix (which omitted resultQtys).
-  const importableQtys = useMemo(() => {
-    if (!selectedImportQuote) return [];
-    if (selectedImportQuote.resultQtys?.length > 0)
-      return selectedImportQuote.resultQtys.map(Number);
-    // Fallback: derive from results keys
-    const keys = Object.keys(selectedImportQuote.results || {})
-      .map(Number)
-      .filter((n) => !isNaN(n) && n > 0)
-      .sort((a, b) => a - b);
-    return keys;
-  }, [selectedImportQuote]);
-
-  // Called immediately when the user picks a quantity — no extra button needed.
-  function applyPrintQuoteImport(snap, qtyNum) {
-    // JSON round-trip turns numeric keys to strings, so check both
-    const result = snap.results?.[qtyNum] ?? snap.results?.[String(qtyNum)];
-    if (!result) return;
-
-    const specSummary  = buildSpecSummary(snap);
-    // Use price-per-copy BEFORE VAT so the invoice VAT toggle stays accurate
-    const pricePerCopy = result.orderedQty > 0
-      ? round2((result.beforeVAT ?? result.grandTotal) / result.orderedQty)
-      : round2(result.unitPrice ?? 0);
-
-    setClientName(snap.clientName || "");
-    setClientPhone(snap.clientPhone || "");
-    setClientEmail(snap.clientEmail || "");
-
-    setLineItems([{
-      _key:        crypto.randomUUID(),
-      itemId:      "",
-      name:        snap.jobTitle || "Book printing",
-      description: specSummary,
-      unit:        "copy",
-      qty:         result.orderedQty ?? qtyNum,
-      unitPrice:   pricePerCopy,
-    }]);
-
-    // Mirror VAT setting from original quote
-    setApplyVAT(!!(snap.job?.applyVAT));
-
-    // Leave a reference note
-    setNotes((prev) => {
-      const base = `Based on print quote ${snap.ref}`;
-      return prev.trim() ? `${base}\n${prev.trim()}` : base;
-    });
-
-    // Preserve the full snapshot so it can be saved on the invoice and later
-    // used by createJobFromInvoice to populate the Production/Designer SpecSheet.
-    setImportedQuoteSnapshot(snap);
-
-    // Keep the picker on this quote so the user can see what was applied;
-    // they can change the quantity again or pick a different quote.
-  }
-
-  function applyDigitalQuoteImport(snap) {
-    if (!snap) return;
-    const res         = snap.result ?? {};
-    const specSummary = res.description || buildDigitalSpecSummary(snap);
-    const qty         = Number(res.qty) || 1;
-    const sellPrice   = Number(res.sellPrice) || 0;
-    const unitPrice   = qty > 0 ? round2(sellPrice / qty) : sellPrice;
-
+  // Fill client details from the quote only when CS hasn't entered any yet.
+  function fillClientFromQuote(snap) {
+    if (clientName.trim() || clientPhone.trim()) return;
     setClientName(snap.clientName   || "");
     setClientPhone(snap.clientPhone || "");
     setClientEmail(snap.clientEmail || "");
+  }
 
-    setLineItems([{
-      _key:        crypto.randomUUID(),
-      itemId:      "",
-      name:        snap.jobTitle || "Digital Print",
-      description: specSummary,
-      unit:        "copy",
-      qty,
-      unitPrice,
-    }]);
-
-    setApplyVAT(false);
-
-    setNotes((prev) => {
-      const base = `Based on digital quote ${snap.ref}`;
-      return prev.trim() ? `${base}\n${prev.trim()}` : base;
+  // Add a saved quote as a new line (or fill the trailing empty line).
+  function addQuoteLine(snap, type) {
+    const line = quoteToLine(snap, type);
+    if (!line) {
+      setError(`Quote ${snap.ref} has no priced quantities. Open it, generate the quote and save it again.`);
+      return;
+    }
+    setError("");
+    setLineItems((prev) => {
+      const last = prev[prev.length - 1];
+      const lastIsBlank = last && !last.name.trim() && !Number(last.unitPrice);
+      return lastIsBlank ? [...prev.slice(0, -1), line] : [...prev, line];
     });
+    fillClientFromQuote(snap);
+    // Offset quotes remember whether VAT was applied; switch it on if so.
+    if (type === "offset" && snap.job?.applyVAT) setApplyVAT(true);
+  }
 
-    setImportedQuoteSnapshot(snap);
+  // Offset quote line: switching the quantity re-prices from the saved results.
+  function changeQuoteQty(key, snap, qtyNum) {
+    const price = offsetPriceFor(snap, qtyNum);
+    if (price) updateLine(key, { ...price, quoteQty: qtyNum });
   }
 
   // ── Type change → new ref (unless editing existing record)
@@ -394,6 +464,17 @@ export default function InvoiceBuilder({
     setLineItems((prev) => [...prev, newLine()]);
   }
   function handleNameChange(key, val) {
+    // Picked a saved quote from the item list → turn this line into a quote item
+    const quoteHit = quoteOptions.get(val);
+    if (quoteHit) {
+      const line = quoteToLine(quoteHit.snap, quoteHit.type);
+      if (line) {
+        setLineItems((prev) => prev.map((li) => li._key === key ? { ...line, _key: key } : li));
+        fillClientFromQuote(quoteHit.snap);
+        if (quoteHit.type === "offset" && quoteHit.snap.job?.applyVAT) setApplyVAT(true);
+        return;
+      }
+    }
     const found = catalogueItems.find((i) => i.name === val);
     if (found) {
       updateLine(key, {
@@ -449,15 +530,21 @@ export default function InvoiceBuilder({
           unitPrice:   Number(li.unitPrice),
           total:       round2(Number(li.qty) * Number(li.unitPrice)),
           ...(li.category   ? { category:   li.category   } : {}),
+          ...(li.itemType   ? { itemType:   li.itemType   } : {}),
           ...(li.printSpecs ? { printSpecs: li.printSpecs } : {}),
+          // Reference only — the snapshot itself goes in quote_snapshot below
+          ...(li.quoteSnapshot ? {
+            quoteRef:  li.quoteRef,
+            quoteType: li.quoteType,
+            ...(li.quoteQty != null ? { quoteQty: li.quoteQty } : {}),
+          } : {}),
         })),
         subtotal, discount_pct: discountPct, discount_amt: discountAmt,
         vat_amt: vatAmt, total, notes: notes || null,
         customer_id:      linkedCustomerId       || null,
-        // Full PrintQuoteGH snapshot — only present when CS imported from a saved
-        // quote. Preserved so that the SpecSheet can render in Production/Designer
-        // even when the job is created later via the Accounts payment flow.
-        quote_snapshot:   importedQuoteSnapshot  || null,
+        // Saved quote snapshot(s) — so the SpecSheet can render in Production/
+        // Designer when the job is created later via the Accounts payment flow.
+        quote_snapshot:   invoiceQuoteSnapshot(validLines, legacyQuoteSnapshot, { ref, clientName, clientPhone, total }),
       };
       const result = await saveInvoice(payload, isEdit ? initial.id : null);
       if (overrideStatus) setDocStatus(overrideStatus);
@@ -553,10 +640,6 @@ export default function InvoiceBuilder({
     if (win) { win.document.write(html); win.document.close(); }
   }
 
-  const inpAmber =
-    "w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-gray-900 " +
-    "placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-400/40 focus:border-amber-500";
-
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
 
@@ -565,136 +648,6 @@ export default function InvoiceBuilder({
         className="text-sm font-medium text-[var(--t-muted)] hover:text-[var(--t-text1)] transition-colors mb-6 block">
         ← Back to invoices
       </button>
-
-      {/* ── 00 — Import from print quote ── always visible ── */}
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 sm:p-5 mb-4">
-        <div className="flex items-start justify-between gap-2 mb-1">
-          <div className="text-xs font-semibold uppercase tracking-widest text-amber-700">
-            Import from saved print quote
-          </div>
-          <span className="text-[10px] font-medium text-amber-500 bg-amber-100 rounded px-2 py-0.5 shrink-0">optional</span>
-        </div>
-
-        {savedPrintQuotes.length === 0 ? (
-          <p className="text-xs text-amber-700/70 leading-relaxed">
-            No saved print quotes found. Go to <strong>Print Quotes → Create Quote</strong>, generate a
-            quote and click <strong>💾 Save quote</strong> — it will then appear here so you can
-            pull it directly into this invoice.
-          </p>
-        ) : (
-          <>
-            <p className="text-xs text-amber-600 mb-3">
-              Select a quote, then pick the quantity — fields fill in automatically.
-            </p>
-            <div className="flex flex-wrap gap-3 items-end">
-              {/* Step 1 — pick quote */}
-              <div className="flex-1 min-w-[220px]">
-                <label className="block text-xs font-medium text-amber-700 mb-1.5">
-                  1 · Select print quote
-                </label>
-                <select
-                  className={inpAmber}
-                  value={importQuoteRef}
-                  onChange={(e) => setImportQuoteRef(e.target.value)}
-                >
-                  <option value="">— choose a saved print quote —</option>
-                  {savedPrintQuotes.map((q) => (
-                    <option key={q.ref} value={q.ref}>
-                      {q.ref} · {q.jobTitle || "Untitled"} · {q.clientName || "No client"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Step 2 — pick quantity → auto-applies immediately */}
-              {selectedImportQuote && importableQtys.length > 0 && (
-                <div>
-                  <label className="block text-xs font-medium text-amber-700 mb-1.5">
-                    2 · Select quantity (auto-fills form)
-                  </label>
-                  <select
-                    className={inpAmber}
-                    defaultValue=""
-                    style={{ minWidth: 200 }}
-                    onChange={(e) => {
-                      const qty = Number(e.target.value);
-                      if (qty) applyPrintQuoteImport(selectedImportQuote, qty);
-                    }}
-                  >
-                    <option value="">— pick quantity to import —</option>
-                    {importableQtys.map((q) => {
-                      const r = selectedImportQuote.results?.[q]
-                             ?? selectedImportQuote.results?.[String(q)];
-                      return (
-                        <option key={q} value={q}>
-                          {Number(q).toLocaleString()} copies
-                          {r?.grandTotal
-                            ? ` — GH₵ ${Number(r.grandTotal).toLocaleString("en-GH", { minimumFractionDigits: 2 })}`
-                            : ""}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-              )}
-
-              {/* No results saved — tell user to regenerate */}
-              {selectedImportQuote && importableQtys.length === 0 && (
-                <div className="text-xs text-amber-700 bg-amber-100 rounded-lg px-3 py-2 border border-amber-200 max-w-xs">
-                  ⚠ This quote was saved without generating results. Open it in
-                  <strong> Print Quotes</strong>, click <strong>Generate quote →</strong>
-                  then <strong>💾 Save quote</strong> again to make it importable.
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* ── 00b — Import from digital print quote ── */}
-      <div className="rounded-xl border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/10 dark:border-indigo-700 p-4 sm:p-5 mb-4">
-        <div className="flex items-start justify-between gap-2 mb-1">
-          <div className="text-xs font-semibold uppercase tracking-widest text-indigo-700 dark:text-indigo-400">
-            Import from saved digital quote
-          </div>
-          <span className="text-[10px] font-medium text-indigo-500 bg-indigo-100 dark:bg-indigo-900/30 rounded px-2 py-0.5 shrink-0">optional</span>
-        </div>
-
-        {savedDigitalQuotes.length === 0 ? (
-          <p className="text-xs text-indigo-700/70 dark:text-indigo-400 leading-relaxed">
-            No saved digital quotes found. Go to <strong>Print Quotes → Digital Print</strong>, build a
-            quote and click <strong>💾 Save quote</strong> — it will then appear here.
-          </p>
-        ) : (
-          <>
-            <p className="text-xs text-indigo-600 dark:text-indigo-400 mb-3">
-              Select a digital quote — fields fill in automatically with the client price.
-            </p>
-            <div className="flex-1 min-w-[220px]">
-              <label className="block text-xs font-medium text-indigo-700 dark:text-indigo-400 mb-1.5">
-                Select digital quote
-              </label>
-              <select
-                className="w-full rounded-lg border border-indigo-300 bg-white dark:bg-[var(--t-bg)] dark:border-indigo-600 px-3 py-2 text-sm text-gray-900 dark:text-[var(--t-text1)] focus:outline-none focus:ring-2 focus:ring-indigo-400/40 focus:border-indigo-500"
-                value={importDigitalRef}
-                onChange={(e) => {
-                  const ref = e.target.value;
-                  setImportDigitalRef(ref);
-                  const snap = savedDigitalQuotes.find((q) => q.ref === ref);
-                  if (snap) applyDigitalQuoteImport(snap);
-                }}
-              >
-                <option value="">— choose a saved digital quote —</option>
-                {savedDigitalQuotes.map((q) => (
-                  <option key={q.ref} value={q.ref}>
-                    {q.ref} · {q.jobTitle || "Untitled"} · {q.clientName || "No client"} · {GHS(q.result?.sellPrice ?? 0)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </>
-        )}
-      </div>
 
       {/* ── 01 Document type + meta ── */}
       <div className="rounded-xl bg-brand-cream p-5 sm:p-6 mb-4">
@@ -787,9 +740,10 @@ export default function InvoiceBuilder({
           03 — Line items
         </div>
 
-        {catalogueItems.length > 0 && (
+        {(catalogueItems.length > 0 || quoteOptions.size > 0) && (
           <p className="text-xs text-gray-500 mb-3">
-            💡 Type an item name — if it matches your catalogue it will pre-fill the price and unit.
+            💡 Type an item name — catalogue items and saved print quotes (type the quote ref, e.g. "DQ-")
+            pre-fill the price and unit.
           </p>
         )}
 
@@ -798,7 +752,7 @@ export default function InvoiceBuilder({
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b-2 border-gray-300">
                 <th className="py-2 pr-3">Item / Description</th>
-                <th className="py-2 pr-3 text-center" style={{ width: 70 }}>Qty</th>
+                <th className="py-2 pr-3 text-center" style={{ width: 100 }}>Qty</th>
                 <th className="py-2 pr-3 text-center" style={{ width: 64 }}>Unit</th>
                 <th className="py-2 pr-3 text-right" style={{ width: 110 }}>Unit price</th>
                 <th className="py-2 pr-3 text-right" style={{ width: 110 }}>Total</th>
@@ -822,7 +776,20 @@ export default function InvoiceBuilder({
                       />
                       <datalist id={`cat-${li._key}`}>
                         {catalogueItems.map((i) => <option key={i.id} value={i.name} />)}
+                        {[...quoteOptions.entries()].map(([label, { type }]) => (
+                          <option key={`q-${label}`} value={label}>
+                            {type === "offset" ? "Offset print quote" : "Digital print quote"}
+                          </option>
+                        ))}
                       </datalist>
+                      {li.quoteSnapshot && (
+                        <span className={[
+                          "mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                          li.quoteType === "offset" ? "bg-amber-100 text-amber-800" : "bg-indigo-100 text-indigo-800",
+                        ].join(" ")}>
+                          {li.quoteType === "offset" ? "Offset" : "Digital"} print quote · {li.quoteRef}
+                        </span>
+                      )}
                       {/* Description */}
                       <input
                         type="text"
@@ -833,12 +800,32 @@ export default function InvoiceBuilder({
                       />
                     </td>
                     <td className="py-2.5 pr-3 text-center">
-                      <input
-                        type="number" min="0.01" step="any"
-                        value={li.qty}
-                        onChange={(e) => updateLine(li._key, { qty: e.target.value })}
-                        className="w-16 text-center rounded-lg border border-gray-300 bg-white px-1.5 py-1.5 text-sm focus:outline-none focus:border-brand-red"
-                      />
+                      {li.quoteType === "offset" && li.quoteSnapshot ? (
+                        // Offset quote: choose one of the quantities the quote was priced at
+                        <select
+                          value={li.quoteQty ?? li.qty}
+                          onChange={(e) => changeQuoteQty(li._key, li.quoteSnapshot, Number(e.target.value))}
+                          className="w-24 rounded-lg border border-gray-300 bg-white px-1.5 py-1.5 text-sm focus:outline-none focus:border-brand-red"
+                          title="Quantities priced in this quote"
+                        >
+                          {offsetQuoteQtys(li.quoteSnapshot).map((q) => {
+                            const p = offsetPriceFor(li.quoteSnapshot, q);
+                            return p ? <option key={q} value={q}>{Number(p.qty).toLocaleString()}</option> : null;
+                          })}
+                        </select>
+                      ) : li.quoteType === "digital" && li.quoteSnapshot ? (
+                        // Digital quote: priced for one quantity — re-quote to change it
+                        <span className="inline-block w-16 py-1.5 text-sm font-medium" title="Priced for this quantity. Re-quote in the Digital quoter to change it.">
+                          {Number(li.qty).toLocaleString()}
+                        </span>
+                      ) : (
+                        <input
+                          type="number" min="0.01" step="any"
+                          value={li.qty}
+                          onChange={(e) => updateLine(li._key, { qty: e.target.value })}
+                          className="w-16 text-center rounded-lg border border-gray-300 bg-white px-1.5 py-1.5 text-sm focus:outline-none focus:border-brand-red"
+                        />
+                      )}
                     </td>
                     <td className="py-2.5 pr-3 text-center">
                       <input
@@ -878,13 +865,18 @@ export default function InvoiceBuilder({
           </table>
         </div>
 
-        <button
-          type="button"
-          onClick={addLine}
-          className="mt-3 text-sm font-medium text-brand-red hover:underline"
-        >
-          + Add line item
-        </button>
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+          <button
+            type="button"
+            onClick={addLine}
+            className="text-sm font-medium text-brand-red hover:underline"
+          >
+            + Add line item
+          </button>
+
+          {/* Saved quotes behave like print items — search all of them, add as many as needed */}
+          <QuotePicker onPick={addQuoteLine} />
+        </div>
       </div>
 
       {/* ── 04 Totals ── */}

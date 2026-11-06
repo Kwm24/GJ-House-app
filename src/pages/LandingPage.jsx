@@ -217,7 +217,7 @@ function Nav({ appName, logoUrl, navBg, navText, accent, onGetQuote }) {
             Sign In
           </Link>
           <button type="button" onClick={onGetQuote} className="lp-btn px-4 py-2 rounded-[6px] text-sm font-medium text-white transition-all">
-            Instant Quoter
+            Live Quote
           </button>
         </div>
 
@@ -240,7 +240,7 @@ function Nav({ appName, logoUrl, navBg, navText, accent, onGetQuote }) {
           ))}
           <div className="pt-2 flex flex-col gap-2">
             <Link to="/login"  className="block text-center px-4 py-2.5 rounded-[6px] border border-[#E8E8EC] text-sm font-medium" style={{ color: navText }}>Sign In</Link>
-            <button type="button" onClick={() => { setMenuOpen(false); onGetQuote(); }} className="lp-btn block w-full text-center px-4 py-2.5 rounded-[6px] text-sm font-medium text-white">Instant Quoter</button>
+            <button type="button" onClick={() => { setMenuOpen(false); onGetQuote(); }} className="lp-btn block w-full text-center px-4 py-2.5 rounded-[6px] text-sm font-medium text-white">Live Quote</button>
           </div>
         </div>
       )}
@@ -273,7 +273,7 @@ function Hero({ hero, styles, onGetQuote }) {
           <Reveal delay={320}>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <button type="button" onClick={onGetQuote} className="lp-btn inline-flex items-center gap-2 px-6 py-3 rounded-[6px] text-sm font-semibold text-white transition-all">
-                Get an Instant Quote
+                Get a Live Quote
               </button>
               <a href="#how-it-works" className="inline-flex items-center gap-2 px-6 py-3 rounded-[6px] border border-[#E8E8EC] bg-white/70 text-sm font-semibold hover:bg-white transition-colors" style={{ color: "var(--lp-text1)" }}>
                 See how it works
@@ -419,10 +419,22 @@ function HowItWorks({ steps, styles }) {
                   {i < steps.length - 1 && (
                     <div className="hidden lg:block absolute top-6 left-[calc(100%+10px)] w-[calc(100%-20px)] h-px bg-[#E8E8EC] z-0" />
                   )}
-                  <div className="bg-white rounded-xl border border-[#E8E8EC] p-6 relative z-10">
-                    <p className="text-2xl font-bold tracking-[-0.03em] mb-3" style={{ color: "var(--lp-accent)" }}>{step.number}</p>
-                    <h3 className="font-semibold mb-2" style={{ color: "var(--lp-text1)" }}>{step.title}</h3>
-                    <p className="text-sm leading-relaxed" style={{ color: "var(--lp-text2)" }}>{step.description}</p>
+                  <div className="group bg-white rounded-xl border border-[#E8E8EC] overflow-hidden relative z-10 h-full">
+                    {step.image_url && (
+                      <div className="w-full h-36 overflow-hidden">
+                        <img
+                          src={step.image_url}
+                          alt={step.title}
+                          loading="lazy"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        />
+                      </div>
+                    )}
+                    <div className="p-6">
+                      <p className="text-2xl font-bold tracking-[-0.03em] mb-3" style={{ color: "var(--lp-accent)" }}>{step.number}</p>
+                      <h3 className="font-semibold mb-2" style={{ color: "var(--lp-text1)" }}>{step.title}</h3>
+                      <p className="text-sm leading-relaxed" style={{ color: "var(--lp-text2)" }}>{step.description}</p>
+                    </div>
                   </div>
                 </div>
               </Reveal>
@@ -434,7 +446,7 @@ function HowItWorks({ steps, styles }) {
   );
 }
 
-// ── Instant Quote modal (triggered by "Instant Quoter" nav button) ───────────
+// ── Live Quote modal (triggered by the "Live Quote" nav button) ───────────
 function QuoteModal({ open, onClose, accent, whatsappNumber }) {
   const [quoteSummary, setQuoteSummary] = useState(null);
   if (!open) return null;
@@ -454,7 +466,7 @@ function QuoteModal({ open, onClose, accent, whatsappNumber }) {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E8E8EC]">
           <div>
-            <h2 className="text-base font-bold" style={{ color: "var(--lp-text1)" }}>Get an Instant Price</h2>
+            <h2 className="text-base font-bold" style={{ color: "var(--lp-text1)" }}>Live Quote</h2>
             <p className="text-xs" style={{ color: "var(--lp-text2)" }}>
               Configure your job and see an estimated price right away.
             </p>
@@ -465,7 +477,7 @@ function QuoteModal({ open, onClose, accent, whatsappNumber }) {
         </div>
         {/* Quoter */}
         <div className="overflow-y-auto max-h-[65vh]">
-          <InstantQuoter accentHex={accent} onResult={setQuoteSummary} />
+          <InstantQuoter accentHex={accent} onResult={setQuoteSummary} whatsappNumber={whatsappNumber} />
         </div>
         {/* CTA */}
         <div className="border-t border-[#E8E8EC] px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">

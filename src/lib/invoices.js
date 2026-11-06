@@ -85,6 +85,22 @@ export async function listInvoicesByRefs(refs) {
   return data ?? [];
 }
 
+// Totals + line items for a batch of invoice refs (Accounts cost breakdown).
+// Chunked so a long list of refs doesn't overflow the request URL.
+export async function listInvoiceTotalsByRefs(refs) {
+  const unique = [...new Set((refs ?? []).filter(Boolean))];
+  const out = [];
+  for (let i = 0; i < unique.length; i += 100) {
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("ref, type, total, subtotal, discount_amt, vat_amt, line_items")
+      .in("ref", unique.slice(i, i + 100));
+    if (error) throw error;
+    out.push(...(data ?? []));
+  }
+  return out;
+}
+
 // Fetch a single invoice by its ref string — used by Production JobDetail to
 // read line items (including print specs) for the job's matching invoice.
 export async function getInvoiceByRef(ref) {

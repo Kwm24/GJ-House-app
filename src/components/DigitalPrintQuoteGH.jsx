@@ -8,23 +8,20 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { getSettings } from "../lib/settings.js";
-import { DEFAULT_DIGITAL_RATES, DIGITAL_STOCK_NAMES, DIGITAL_SHEET_NAMES } from "../lib/digitalPrintSpecs.js";
+import {
+  DEFAULT_DIGITAL_RATES, DIGITAL_STOCK_NAMES,
+  LAMINATION_NONE, laminationOptions,
+  DIGITAL_SIZES, digitalSizeLabel,
+} from "../lib/digitalPrintSpecs.js";
+import { UNIT_KEYS, convertLength, fmtDims } from "../lib/units.js";
+import { computeDigitalQuote } from "../lib/digitalQuoteCalc.js";
+import { DigitalQuoteResults } from "./quote/DigitalQuoteResults.jsx";
+import { DimensionInput, UnitSelect } from "./DimensionInput.jsx";
 import { saveDigitalQuoteToStorage } from "../lib/quoteStorage.js";
-import { formatGHS as GHS } from "../lib/currency.js";
 import { CustomerPicker } from "./CustomerPicker.jsx";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const SIZES = {
-  'A6 (105×148)':          [105, 148],
-  'DL (99×210)':           [99,  210],
-  'A5 (148×210)':          [148, 210],
-  'A4 (210×297)':          [210, 297],
-  'A3 (297×420)':          [297, 420],
-  'Business card (90×55)': [90,   55],
-  'A4 flat (297×210)':     [297, 210],
-  'A3 flat (420×297)':     [420, 297],
-  'Custom':                null,
-};
+const SIZES = DIGITAL_SIZES;   // finished-size presets (mm)
 
 const JOB_PRESETS = {
   flyer:   { size: 'A5 (148×210)',          duplex: false, qty: 500  },
@@ -48,7 +45,6 @@ const JOB_TYPES = [
   { value: 'custom',   label: 'Other / Custom' },
 ];
 
-const UNIT_TO_M = { ft: 0.3048, m: 1, cm: 0.01, in: 0.0254 };
 
 function genDigitalRef() {
   const d  = new Date();
@@ -57,49 +53,16 @@ function genDigitalRef() {
   return `DQ-${ts}-${rnd}`;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-function fitOnSheet(W, H, w, h, g) {
-  const attempt = (a, b, rotated) => {
-    const c = Math.floor((W + g) / (a + g));
-    const n = Math.floor((H + g) / (b + g));
-    return (c > 0 && n > 0) ? { c, n, rotated, up: c * n, a, b } : { up: 0 };
-  };
-  const normal  = attempt(w, h, false);
-  const rotated = attempt(h, w, true);
-  return rotated.up > normal.up ? rotated : normal;
-}
-
-function calcComparison(w, h, pieces, duplex, stock, rates) {
-  const results = {};
-  for (const name of DIGITAL_SHEET_NAMES) {
-    const S = rates.sheets[name];
-    if (!S) { results[name] = { name, up: 0 }; continue; }
-    const f = fitOnSheet(S.w - 2 * rates.margin, S.h - 2 * rates.margin, w, h, rates.gutter);
-    if (!f.up) { results[name] = { name, up: 0 }; continue; }
-    const base      = Math.ceil(pieces / f.up);
-    // Cap wasteFixed at base so small-run jobs aren't inflated (e.g. 1 cover → 7 sheets)
-    const sheets    = base + Math.ceil(base * rates.wastePct / 100) + Math.min(rates.wasteFixed, base);
-    const printCost = duplex ? S.p2 : S.p1;
-    const paperCost = (rates.stocks[stock] || {})[name] || 0;
-    const perSheet  = printCost + paperCost;
-    results[name] = { name, f, up: f.up, sheets, perSheet, cost: sheets * perSheet };
-  }
-  return results;
-}
-
-function cheapest(results) {
-  const valid = Object.values(results).filter((r) => r.up > 0);
-  return valid.length ? valid.reduce((a, b) => b.cost < a.cost ? b : a) : null;
-}
-
 export function buildDigitalSpecSummary(snap) {
   const j = snap.job || {};
   const isLF = j.jobType === 'banner' || j.jobType === 'sticker';
   if (isLF) {
     const label = j.jobType === 'banner' ? 'Banner' : 'Sticker';
-    return `${label}: ${j.lfWidth}×${j.lfHeight} ${j.lfUnit} · ${j.lfMat}`;
+    return `${label}: ${j.lfWidth}${j.lfUnit} × ${j.lfHeight}${j.lfUnit} · ${j.lfMat}`;
   }
-  const sizeLabel = j.sizeKey === 'Custom' ? `${j.customW}×${j.customH}mm` : j.sizeKey;
+  const sizeLabel = j.sizeKey === 'Custom'
+    ? `Custom (${fmtDims(j.customW, j.customH, 'mm', j.dimUnit || 'mm')})`
+    : digitalSizeLabel(j.sizeKey, j.dimUnit || 'mm');
   const parts = [
     `Digital ${j.jobType}`,
     sizeLabel,
@@ -110,45 +73,13 @@ export function buildDigitalSpecSummary(snap) {
   if (j.jobType === 'book') {
     parts.push(`${j.pages}pp`);
     parts.push(j.bindType);
+    if (j.coverStock) parts.push(`Cover ${j.coverStock}${j.covDuplex ? ' (in + out)' : ''}`);
+  }
+  if (j.lamination && j.lamination !== LAMINATION_NONE) {
+    parts.push(`${j.lamination} lamination${j.jobType === 'book' ? ' (cover)' : ''}`);
   }
   if (snap.result?.sheetName) parts.push(snap.result.sheetName);
   return parts.join(' · ');
-}
-
-// ── Layout preview ─────────────────────────────────────────────────────────────
-function SheetPreview({ result, label, sheetDims }) {
-  if (!result?.up || !result.f || !sheetDims) return null;
-  const S  = sheetDims;
-  const sc = Math.min(200 / S.w, 200 / S.h);
-  const f  = result.f;
-  const m  = 5;
-  const ox = m + (S.w - 2 * m - (f.c * f.a + Math.max(0, f.c - 1) * 3)) / 2;
-  const oy = m + (S.h - 2 * m - (f.n * f.b + Math.max(0, f.n - 1) * 3)) / 2;
-  const pieces = [];
-  for (let i = 0; i < f.c; i++) {
-    for (let j = 0; j < f.n; j++) {
-      pieces.push(
-        <rect key={`${i}-${j}`}
-          x={(ox + i * (f.a + 3)) * sc} y={(oy + j * (f.b + 3)) * sc}
-          width={f.a * sc} height={f.b * sc}
-          fill="#6366F1" fillOpacity="0.22" stroke="#6366F1" strokeWidth="1"
-        />
-      );
-    }
-  }
-  return (
-    <div className="flex flex-col items-center gap-1.5">
-      <svg viewBox={`0 0 ${S.w * sc} ${S.h * sc}`} width={S.w * sc} height={S.h * sc}
-        className="rounded border border-[var(--t-border)]" style={{ background: 'var(--t-bg)' }}>
-        <rect width={S.w * sc} height={S.h * sc} fill="var(--t-bg)" stroke="var(--t-border)" strokeWidth="1"/>
-        {pieces}
-      </svg>
-      <p className="text-[10px] text-[var(--t-muted)] text-center">
-        {label && <span className="font-medium">{label}: </span>}
-        {result.name}, {f.c}×{f.n} = {f.up} up{f.rotated ? ', rotated' : ''}
-      </p>
-    </div>
-  );
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
@@ -170,6 +101,8 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
   const [sizeKey,    setSizeKey]    = useState(initJob.sizeKey   || JOB_PRESETS[initJob.jobType || 'flyer'].size);
   const [customW,    setCustomW]    = useState(initJob.customW   || 100);
   const [customH,    setCustomH]    = useState(initJob.customH   || 150);
+  // Unit sizes are shown/typed in (still stored + priced in mm); saved with the quote
+  const [dimUnit,    setDimUnit]    = useState(initJob.dimUnit   || 'mm');
   const [qty,        setQty]        = useState(initJob.qty       || JOB_PRESETS[initJob.jobType || 'flyer'].qty);
   const [stock,      setStock]      = useState(initJob.stock     || '130gsm Gloss');
   const [duplex,     setDuplex]     = useState(initJob.duplex    ?? JOB_PRESETS[initJob.jobType || 'flyer'].duplex);
@@ -182,10 +115,20 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
   const [coverStock, setCoverStock] = useState(initJob.coverStock || '250gsm Card');
   const [covDuplex,  setCovDuplex]  = useState(initJob.covDuplex  || false);
 
+  // Lamination (not offered for banners / stickers)
+  const [lamination, setLamination] = useState(initJob.lamination || LAMINATION_NONE);
+
   // Large format
   const [lfWidth,  setLfWidth]  = useState(initJob.lfWidth  || 6);
   const [lfHeight, setLfHeight] = useState(initJob.lfHeight || 3);
   const [lfUnit,   setLfUnit]   = useState(initJob.lfUnit   || 'ft');
+
+  // Changing the banner/sticker unit converts the typed size (20cm → 0.2m)
+  function changeLfUnit(next) {
+    setLfWidth((w) => convertLength(w, lfUnit, next));
+    setLfHeight((h) => convertLength(h, lfUnit, next));
+    setLfUnit(next);
+  }
   const [lfMat,    setLfMat]    = useState(initJob.lfMat    || '');
 
   // Selected sheet (null = auto-cheapest)
@@ -209,83 +152,16 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
     if (type === 'sticker') { setLfWidth(10); setLfHeight(10); setLfUnit('cm'); }
   }
 
-  const isLF   = jobType === 'banner' || jobType === 'sticker';
-  const isBook = jobType === 'book';
-  const isFold = jobType === 'brochure' || jobType === 'trifold';
-
-  const dims = useMemo(() => {
-    if (sizeKey === 'Custom') return [customW || 0, customH || 0];
-    return SIZES[sizeKey] || [210, 297];
-  }, [sizeKey, customW, customH]);
-
-  const normPages = useMemo(() => {
-    if (!isBook) return 1;
-    if (bindType === 'Saddle stitch') return Math.ceil(pages / 4) * 4;
-    return Math.ceil(pages / 2) * 2;
-  }, [isBook, pages, bindType]);
-
-  const leavesPerCopy = duplex ? Math.ceil(normPages / 2) : normPages;
-
-  const comparison = useMemo(() => {
-    if (isLF) return {};
-    const [w, h] = dims;
-    return calcComparison(w, h, qty * leavesPerCopy, duplex, stock, rates);
-  }, [isLF, dims, qty, leavesPerCopy, duplex, stock, rates]);
-
-  const bestSheet    = useMemo(() => cheapest(comparison), [comparison]);
-  const pickedResult = useMemo(() => {
-    if (!pickedSheet) return bestSheet;
-    const r = comparison[pickedSheet];
-    return (r && r.up > 0) ? r : bestSheet;
-  }, [pickedSheet, comparison, bestSheet]);
-
-  const coverComparison = useMemo(() => {
-    if (!isBook) return {};
-    const [w, h] = dims;
-    const spineW = bindType === 'Perfect bound' ? (spine || 0) : 0;
-    return calcComparison(2 * w + spineW, h, qty, covDuplex, coverStock, rates);
-  }, [isBook, dims, bindType, spine, qty, covDuplex, coverStock, rates]);
-
-  const bestCover = useMemo(() => cheapest(coverComparison), [coverComparison]);
-
-  const lfMaterials = Object.keys(rates.lf[jobType] || {});
-  const activeMat   = lfMat || lfMaterials[0] || '';
-
-  const lfQuote = useMemo(() => {
-    if (!isLF) return null;
-    const matRates = rates.lf[jobType] || {};
-    const rate     = matRates[activeMat] || 0;
-    const sq       = rates.areaUnit === 'sqft';
-    const toM      = UNIT_TO_M[lfUnit] || 1;
-    const areaSqM  = (lfWidth * toM) * (lfHeight * toM);
-    const area     = sq ? areaSqM * 10.7639 : areaSqM;
-    const rawCost  = area * rate;
-    const perPiece = Math.max(rates.lfMin, rawCost);
-    const fin      = jobType === 'banner' ? rates.bannerFin : rates.stickerCut;
-    const rows     = [{ label: `${activeMat}: ${lfWidth}×${lfHeight} ${lfUnit} = ${area.toFixed(2)} ${sq ? 'sq ft' : 'm²'} × ${GHS(rate)}${rawCost < rates.lfMin ? ' (min charge)' : ''} × ${qty}`, amount: perPiece * qty }];
-    if (fin) rows.push({ label: `${jobType === 'banner' ? 'Hem & eyelets' : 'Cutting'} (${qty} × ${GHS(fin)})`, amount: fin * qty });
-    if (extra) rows.push({ label: `Extras (${qty} × ${GHS(extra)})`, amount: qty * extra });
-    if (rates.setup) rows.push({ label: 'Setup fee', amount: rates.setup });
-    const cost = rows.reduce((s, r) => s + r.amount, 0);
-    const sell = cost * (1 + rates.lfMarkup / 100);
-    return { rows, cost, sell, area: area.toFixed(2), unit: sq ? 'sq ft' : 'm²', rate };
-  }, [isLF, jobType, activeMat, lfWidth, lfHeight, lfUnit, qty, extra, rates]);
-
-  const quoteRows = useMemo(() => {
-    if (isLF || !pickedResult) return [];
-    const rows = [];
-    rows.push({ label: isBook ? `Inside pages (${normPages} pp, ${duplex ? 'double' : 'single'}-sided, ${pickedResult.name})` : `Printing (${duplex ? 'double' : 'single'}-sided, ${pickedResult.name})`, amount: pickedResult.cost });
-    if (isBook && bestCover) rows.push({ label: `Cover (${covDuplex ? 'double' : 'single'}-sided, ${bestCover.name})`, amount: bestCover.cost });
-    if (isFold) rows.push({ label: `Folding (${qty} × ${GHS(rates.fold)})`, amount: qty * rates.fold });
-    const bindRate = rates.bind[bindType] || 0;
-    if (isBook && bindRate) rows.push({ label: `${bindType} (${qty} × ${GHS(bindRate)})`, amount: qty * bindRate });
-    if (extra) rows.push({ label: `Extras (${qty} × ${GHS(extra)})`, amount: qty * extra });
-    if (rates.setup) rows.push({ label: 'Setup fee', amount: rates.setup });
-    return rows;
-  }, [isLF, pickedResult, isBook, isFold, normPages, duplex, qty, bestCover, covDuplex, rates, bindType, extra]);
-
-  const totalCost = useMemo(() => quoteRows.reduce((s, r) => s + r.amount, 0), [quoteRows]);
-  const sellPrice = useMemo(() => totalCost * (1 + rates.markup / 100), [totalCost, rates.markup]);
+  // Same maths the Accounts cost breakdown re-runs on saved quotes
+  const calc = useMemo(() => computeDigitalQuote({
+    jobType, sizeKey, customW, customH, qty, stock, duplex, extra,
+    pages, bindType, spine, coverStock, covDuplex, lamination,
+    lfWidth, lfHeight, lfUnit, lfMat,
+  }, rates, pickedSheet), [jobType, sizeKey, customW, customH, qty, stock, duplex, extra,
+    pages, bindType, spine, coverStock, covDuplex, lamination, lfWidth, lfHeight, lfUnit, lfMat, rates, pickedSheet]);
+  const {
+    isLF, isBook, isFold, pickedResult, lfMaterials, activeMat, lfQuote, totalCost, sellPrice,
+  } = calc;
 
   // ── Save quote ──────────────────────────────────────────────────────────────
   function handleSave() {
@@ -297,7 +173,7 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
     const mu    = isLF ? rates.lfMarkup : rates.markup;
 
     const description = buildDigitalSpecSummary({
-      job: { jobType, sizeKey, customW, customH, qty, stock, duplex, pages, bindType, spine, coverStock, covDuplex, extra, lfWidth, lfHeight, lfUnit, lfMat: activeMat },
+      job: { jobType, sizeKey, customW, customH, qty, stock, duplex, pages, bindType, spine, coverStock, covDuplex, lamination: isLF ? LAMINATION_NONE : lamination, extra, lfWidth, lfHeight, lfUnit, lfMat: activeMat, dimUnit },
       result: { sheetName: pickedResult?.name },
     });
 
@@ -306,7 +182,7 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
       date:       new Date().toISOString().slice(0, 10),
       clientName, clientPhone, clientEmail, jobTitle,
       quoteType:  'digital',
-      job: { jobType, sizeKey, customW, customH, qty, stock, duplex, pages, bindType, spine, coverStock, covDuplex, extra, lfWidth, lfHeight, lfUnit, lfMat: activeMat },
+      job: { jobType, sizeKey, customW, customH, qty, stock, duplex, pages, bindType, spine, coverStock, covDuplex, lamination: isLF ? LAMINATION_NONE : lamination, extra, lfWidth, lfHeight, lfUnit, lfMat: activeMat, dimUnit },
       result: {
         qty,
         totalCost: cost,
@@ -414,9 +290,12 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
             <>
               <div>
                 <label className={cls.label}>{isBook ? 'Page size (trim)' : isFold ? 'Flat (open) size' : 'Finished size'}</label>
-                <select className={cls.select} value={sizeKey} onChange={(e) => { setSizeKey(e.target.value); setPickedSheet(null); }}>
-                  {Object.keys(SIZES).map((k) => <option key={k}>{k}</option>)}
-                </select>
+                <div className="flex gap-2">
+                  <select className={cls.select} value={sizeKey} onChange={(e) => { setSizeKey(e.target.value); setPickedSheet(null); }}>
+                    {Object.keys(SIZES).map((k) => <option key={k} value={k}>{digitalSizeLabel(k, dimUnit)}</option>)}
+                  </select>
+                  <UnitSelect value={dimUnit} onChange={setDimUnit} ariaLabel="Size unit" className={cls.select + " !w-auto shrink-0"} />
+                </div>
               </div>
               <div>
                 <label className={cls.label}>Copies (quantity)</label>
@@ -425,12 +304,14 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
               {sizeKey === 'Custom' && (
                 <>
                   <div>
-                    <label className={cls.label}>Width (mm)</label>
-                    <input type="number" className={cls.input} value={customW} onChange={(e) => { setCustomW(parseFloat(e.target.value) || 0); setPickedSheet(null); }} />
+                    <label className={cls.label}>Width ({dimUnit})</label>
+                    <DimensionInput className={cls.input} value={customW} baseUnit="mm" displayUnit={dimUnit}
+                      onChange={(v) => { setCustomW(v); setPickedSheet(null); }} />
                   </div>
                   <div>
-                    <label className={cls.label}>Height (mm)</label>
-                    <input type="number" className={cls.input} value={customH} onChange={(e) => { setCustomH(parseFloat(e.target.value) || 0); setPickedSheet(null); }} />
+                    <label className={cls.label}>Height ({dimUnit})</label>
+                    <DimensionInput className={cls.input} value={customH} baseUnit="mm" displayUnit={dimUnit}
+                      onChange={(v) => { setCustomH(v); setPickedSheet(null); }} />
                   </div>
                 </>
               )}
@@ -448,18 +329,27 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
                 <label className={cls.label}>{isBook ? 'Inside pages printing' : 'Printing'}</label>
                 <div className="flex gap-2">{sided(false)}{sided(true)}</div>
               </div>
+              <div>
+                <label className={cls.label}>{isBook ? 'Cover lamination' : 'Lamination'}</label>
+                <select className={cls.select} value={lamination} onChange={(e) => setLamination(e.target.value)}>
+                  {laminationOptions(rates).map((l) => <option key={l}>{l}</option>)}
+                </select>
+                {lamination !== LAMINATION_NONE && (
+                  <p className="mt-1 text-[10px] text-[var(--t-muted)]">
+                    {isBook ? 'Outside of the cover only.' : duplex ? 'Both printed sides.' : 'The printed side.'}
+                  </p>
+                )}
+              </div>
             </>
           )}
 
           {isLF && (
             <>
-              <div><label className={cls.label}>Width</label><input type="number" step="0.01" className={cls.input} value={lfWidth} onChange={(e) => setLfWidth(parseFloat(e.target.value) || 0)} /></div>
-              <div><label className={cls.label}>Height</label><input type="number" step="0.01" className={cls.input} value={lfHeight} onChange={(e) => setLfHeight(parseFloat(e.target.value) || 0)} /></div>
+              <div><label className={cls.label}>Width ({lfUnit})</label><input type="number" step="any" min="0" className={cls.input} value={lfWidth} onChange={(e) => setLfWidth(parseFloat(e.target.value) || 0)} /></div>
+              <div><label className={cls.label}>Height ({lfUnit})</label><input type="number" step="any" min="0" className={cls.input} value={lfHeight} onChange={(e) => setLfHeight(parseFloat(e.target.value) || 0)} /></div>
               <div>
                 <label className={cls.label}>Unit</label>
-                <select className={cls.select} value={lfUnit} onChange={(e) => setLfUnit(e.target.value)}>
-                  {Object.keys(UNIT_TO_M).map((u) => <option key={u}>{u}</option>)}
-                </select>
+                <UnitSelect value={lfUnit} onChange={changeLfUnit} units={UNIT_KEYS} ariaLabel="Banner or sticker unit" className={cls.select} />
               </div>
               <div><label className={cls.label}>Copies (quantity)</label><input type="number" min="1" className={cls.input} value={qty} onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} /></div>
               <div className="sm:col-span-2">
@@ -513,120 +403,8 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
         )}
       </div>
 
-      {/* ── Sheet comparison ── */}
-      {!isLF && (
-        <div className={cls.card}>
-          <h3 className="text-sm font-semibold text-[var(--t-text1)] mb-3">Parent sheet comparison</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead><tr>
-                <th className={cls.th + " text-left"}>Sheet</th>
-                <th className={cls.th}>Up</th>
-                <th className={cls.th}>Sheets</th>
-                <th className={cls.th}>Cost</th>
-                <th className={cls.th}>Per copy</th>
-              </tr></thead>
-              <tbody>
-                {DIGITAL_SHEET_NAMES.map((name) => {
-                  const r       = comparison[name];
-                  const isBest  = bestSheet?.name === name;
-                  const isPicked = (pickedSheet === name) || (!pickedSheet && isBest);
-                  if (!r || r.up === 0) return (
-                    <tr key={name}>
-                      <td className={cls.td + " text-left"}>{name}</td>
-                      <td className={cls.td + " text-[var(--t-muted)]"} colSpan={4}>Doesn't fit</td>
-                    </tr>
-                  );
-                  return (
-                    <tr key={name} onClick={() => setPickedSheet(name)}
-                      className={`cursor-pointer transition-colors ${isPicked ? 'bg-[#6366F1]/10' : 'hover:bg-[var(--t-bg)]'}`}>
-                      <td className={cls.td + " text-left font-medium"}>
-                        {name}
-                        {isBest && <span className="ml-2 text-[10px] font-semibold text-green-600">★ cheapest</span>}
-                      </td>
-                      <td className={cls.td}>{r.up}</td>
-                      <td className={cls.td}>{r.sheets}</td>
-                      <td className={cls.td}>{GHS(r.cost)}</td>
-                      <td className={cls.td}>{GHS(r.cost / qty)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-[10px] text-[var(--t-muted)]">Tap a row to select that sheet. Count includes waste.</p>
-        </div>
-      )}
-
-      {/* ── Cover comparison (book) ── */}
-      {isBook && (
-        <div className={cls.card}>
-          <h3 className="text-sm font-semibold text-[var(--t-text1)] mb-3">Cover: parent sheet comparison</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead><tr>
-                <th className={cls.th + " text-left"}>Sheet</th><th className={cls.th}>Up</th><th className={cls.th}>Sheets</th><th className={cls.th}>Cost</th>
-              </tr></thead>
-              <tbody>
-                {DIGITAL_SHEET_NAMES.map((name) => {
-                  const r = coverComparison[name];
-                  if (!r || r.up === 0) return <tr key={name}><td className={cls.td + " text-left"}>{name}</td><td className={cls.td + " text-[var(--t-muted)]"} colSpan={3}>Doesn't fit</td></tr>;
-                  return (
-                    <tr key={name} className="hover:bg-[var(--t-bg)] transition-colors">
-                      <td className={cls.td + " text-left font-medium"}>{name}{bestCover?.name === name && <span className="ml-2 text-[10px] font-semibold text-green-600">★</span>}</td>
-                      <td className={cls.td}>{r.up}</td><td className={cls.td}>{r.sheets}</td><td className={cls.td}>{GHS(r.cost)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ── Quote summary ── */}
-      <div className={cls.card}>
-        <h3 className="text-sm font-semibold text-[var(--t-text1)] mb-3">Quote</h3>
-
-        {isLF && lfQuote ? (
-          <>
-            <div className="text-center py-2">
-              <p className="text-[10px] text-[var(--t-muted)] mb-1">Total price</p>
-              <p className="text-3xl font-bold text-[var(--t-text1)] tabular-nums">{GHS(lfQuote.sell)}</p>
-              <p className="text-xs text-[var(--t-muted)] mt-1">{qty} {qty === 1 ? 'piece' : 'pieces'} · {activeMat}</p>
-            </div>
-          </>
-        ) : !isLF && pickedResult ? (
-          <>
-            <div className="text-center py-2">
-              <p className="text-[10px] text-[var(--t-muted)] mb-1">Total price</p>
-              <p className="text-3xl font-bold text-[var(--t-text1)] tabular-nums">{GHS(sellPrice)}</p>
-              <p className="text-xs text-[var(--t-muted)] mt-1">
-                {qty} copies · {GHS(sellPrice / qty)} per copy · {pickedResult.name}
-              </p>
-            </div>
-            <p className="mt-3 text-[11px] text-[var(--t-muted)] text-center">
-              {isBook
-                ? `${normPages} pp · ${leavesPerCopy} leaf${leavesPerCopy !== 1 ? 'ves' : ''}/copy · ${pickedResult.up}-up${duplex ? ` (${pickedResult.up * 2} pages/sheet)` : ''} · ${qty * leavesPerCopy} pieces ÷ ${pickedResult.up} = ${Math.ceil(qty * leavesPerCopy / pickedResult.up)} sheets, +waste = `
-                : `${qty} copies × ${leavesPerCopy} leaf${leavesPerCopy !== 1 ? 'ves' : ''} = ${qty * leavesPerCopy} pieces ÷ ${pickedResult.up} up = ${Math.ceil(qty * leavesPerCopy / pickedResult.up)} sheets, +waste = `}
-              <strong>{pickedResult.sheets}</strong>.
-            </p>
-          </>
-        ) : (
-          <p className="text-sm text-[var(--t-muted)]">This size doesn't fit on any parent sheet. Try a smaller size.</p>
-        )}
-      </div>
-
-      {/* ── Layout preview ── */}
-      {!isLF && pickedResult?.f && (
-        <div className={cls.card}>
-          <h3 className="text-sm font-semibold text-[var(--t-text1)] mb-3">Layout preview</h3>
-          <div className="flex flex-wrap gap-6">
-            <SheetPreview result={pickedResult} sheetDims={rates.sheets[pickedResult.name]} />
-            {isBook && bestCover?.f && <SheetPreview result={bestCover} label="Cover" sheetDims={rates.sheets[bestCover.name]} />}
-          </div>
-        </div>
-      )}
+      <DigitalQuoteResults calc={calc} qty={qty} duplex={duplex} rates={rates}
+        pickedSheet={pickedSheet} onPickSheet={setPickedSheet} />
     </div>
   );
 }

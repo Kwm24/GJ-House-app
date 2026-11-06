@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { getDashboardData } from "../../lib/dashboard.js";
 import { jobStatusLabel } from "../../lib/jobStatus.js";
+// Shared total: handles offset, digital and multi-quote invoices
+import { jobGrandTotal } from "../../lib/jobs.js";
 import { formatGHS as GHS } from "../../lib/currency.js";
 import { TrendingUp, Banknote, Briefcase, AlertCircle, BarChart2, Search } from "lucide-react";
 import { PeriodPicker, filterByPeriod, defaultPeriod } from "../PeriodPicker.jsx";
@@ -296,10 +298,6 @@ function CustomersSection({ customers }) {
 }
 
 // ── Per-job financial helpers ─────────────────────────────────────────────────
-function jobGrandTotal(job) {
-  const qty = job.quote?.resultQtys?.[0];
-  return job.quote?.results?.[qty]?.grandTotal ?? 0;
-}
 function jobTotalPaid(job) {
   return Math.round(
     (job.payments ?? []).reduce((sum, p) => sum + Number(p.amount || 0), 0) * 100

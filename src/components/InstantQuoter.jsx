@@ -1,26 +1,23 @@
 /**
  * InstantQuoter.jsx
- * Customer-facing digital print price calculator.
+ * "Live Quote": customer-facing digital print price calculator.
  * Shows total price and per-unit price. No profit breakdown, no save button.
  * Used on the Landing Page and Customer Portal.
  */
 
 import { useState, useMemo, useEffect } from "react";
 import { getSettings } from "../lib/settings.js";
-import { DEFAULT_DIGITAL_RATES, DIGITAL_STOCK_NAMES, DIGITAL_SHEET_NAMES } from "../lib/digitalPrintSpecs.js";
+import {
+  DEFAULT_DIGITAL_RATES, DIGITAL_STOCK_NAMES, DIGITAL_SHEET_NAMES,
+  LAMINATION_NONE, laminationOptions, laminationCost,
+  DIGITAL_SIZES, digitalSizeLabel,
+} from "../lib/digitalPrintSpecs.js";
+import { UNIT_TO_M, UNIT_KEYS, convertLength, fmtDims } from "../lib/units.js";
+import { DimensionInput, UnitSelect } from "./DimensionInput.jsx";
+import { Info, ChevronDown, ChevronRight } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const SIZES = {
-  'A6 (105×148)':          [105, 148],
-  'DL (99×210)':           [99,  210],
-  'A5 (148×210)':          [148, 210],
-  'A4 (210×297)':          [210, 297],
-  'A3 (297×420)':          [297, 420],
-  'Business card (90×55)': [90,   55],
-  'A4 flat (297×210)':     [297, 210],
-  'A3 flat (420×297)':     [420, 297],
-  'Custom':                null,
-};
+const SIZES = DIGITAL_SIZES;   // finished-size presets (mm)
 
 const JOB_PRESETS = {
   flyer:   { size: 'A5 (148×210)',          duplex: false, qty: 500  },
@@ -44,7 +41,6 @@ const JOB_TYPES = [
   { value: 'custom',   label: 'Other / Custom size' },
 ];
 
-const UNIT_TO_M = { ft: 0.3048, m: 1, cm: 0.01, in: 0.0254 };
 
 const GHS = (n) =>
   "GH₵ " + Number(n || 0).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -80,7 +76,7 @@ function cheapestSheet(w, h, pieces, duplex, stock, rates) {
 }
 
 // ── Build a WhatsApp-ready order summary from a result snapshot ───────────────
-export function buildInstantQuoteSummary({ jobType, jobLabel, size, qty, paper, duplex, pages, bindType, area, areaUnit, mat, total, perUnit }) {
+export function buildInstantQuoteSummary({ jobType, jobLabel, size, qty, paper, duplex, pages, bindType, coverStock, covDuplex, lamination, area, areaUnit, mat, total, perUnit }) {
   const GHSfmt = (n) => "GH₵ " + Number(n).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const isLarge = !!area;
   const lines = [
@@ -96,10 +92,29 @@ export function buildInstantQuoteSummary({ jobType, jobLabel, size, qty, paper, 
   }
   if (pages) lines.push(`Pages: ${pages}`);
   if (bindType) lines.push(`Binding: ${bindType}`);
+  if (coverStock) lines.push(`Cover: ${coverStock}, ${covDuplex ? "printed inside and outside" : "printed outside only"}`);
+  if (lamination && lamination !== LAMINATION_NONE) {
+    lines.push(`Lamination: ${lamination}${jobType === "book" ? " (cover)" : ""}`);
+  }
   if (area) lines.push(`Area: ${area} ${areaUnit} · Material: ${mat}`);
   lines.push("", `Estimated total: ${GHSfmt(total)}`, `Per ${isLarge ? "piece" : "copy"}: ${GHSfmt(perUnit)}`, "", "Please confirm and help me finalise my order. Thank you!");
   return lines.join("\n");
 }
+
+// Plain-language feel for a paper / material weight, read from its gsm
+// ("130gsm Gloss" → 130). Customers rarely know what grammage means.
+function paperFeel(name) {
+  const gsm = parseInt(String(name).match(/(\d+)\s*gsm/i)?.[1], 10);
+  if (!gsm) return null;
+  if (gsm < 100) return { short: 'thin',       feel: 'Like office paper.' };
+  if (gsm < 150) return { short: 'medium',      feel: 'Like a magazine page.' };
+  if (gsm < 200) return { short: 'thick',       feel: 'Like a quality brochure.' };
+  if (gsm < 270) return { short: 'card',        feel: 'Like a postcard.' };
+  if (gsm < 400) return { short: 'stiff card',  feel: 'Like a business card.' };
+  return { short: 'heavy duty', feel: 'Heavy duty, lasts longer outdoors.' };
+}
+
+const paperOption = (s) => { const f = paperFeel(s); return f ? `${s} (${f.short})` : s; };
 
 // Standard paper sizes for sticker presets (width × height in mm)
 const STICKER_SIZE_PRESETS = [
@@ -110,8 +125,12 @@ const STICKER_SIZE_PRESETS = [
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export function InstantQuoter({ accentHex = "#C0392B", onResult }) {
+export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber = "" }) {
   const accent = accentHex;
+  const waDigits = String(whatsappNumber || "").replace(/[^0-9]/g, "");
+  const waLink = waDigits
+    ? `https://wa.me/${waDigits}?text=${encodeURIComponent("Hi, I'd like a quote for an offset / large-quantity print job.")}`
+    : null;
 
   const [rates,             setRates]             = useState(DEFAULT_DIGITAL_RATES);
   const [quoterThumbnails,  setQuoterThumbnails]  = useState({});
@@ -120,6 +139,8 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult }) {
   const [sizeKey, setSizeKey]    = useState(JOB_PRESETS.flyer.size);
   const [customW, setCustomW]    = useState(100);
   const [customH, setCustomH]    = useState(150);
+  // Unit sizes are shown/typed in (sizes are still stored + priced in mm)
+  const [dimUnit, setDimUnit]    = useState('mm');
   const [qty,     setQty]        = useState(500);
   const [stock,   setStock]      = useState('130gsm Gloss');
   const [duplex,  setDuplex]     = useState(false);
@@ -128,12 +149,24 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult }) {
   const [pages,    setPages]    = useState(24);
   const [bindType, setBindType] = useState('Saddle stitch');
   const [spine,    setSpine]    = useState(3);
+  const [coverStock, setCoverStock] = useState('250gsm Card');
+  const [covDuplex,  setCovDuplex]  = useState(false);
+
+  // Lamination (not offered for banners / stickers)
+  const [lamination, setLamination] = useState(LAMINATION_NONE);
 
   // LF
   const [lfWidth,  setLfWidth]  = useState(6);
   const [lfHeight, setLfHeight] = useState(3);
   const [lfUnit,   setLfUnit]   = useState('ft');
   const [lfMat,    setLfMat]    = useState('');
+
+  // Changing the banner/sticker unit converts the typed size (20cm → 0.2m)
+  function changeLfUnit(next) {
+    setLfWidth((w) => convertLength(w, lfUnit, next));
+    setLfHeight((h) => convertLength(h, lfUnit, next));
+    setLfUnit(next);
+  }
 
   useEffect(() => {
     getSettings()
@@ -206,10 +239,16 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult }) {
     let cost = best.cost;
     if (isBook) {
       const spineW = bindType === 'Perfect bound' ? (spine || 0) : 0;
-      const covBest = cheapestSheet(2 * w + spineW, h, qty, false, '250gsm Card', rates);
-      if (covBest) cost += covBest.cost;
+      const covBest = cheapestSheet(2 * w + spineW, h, qty, covDuplex, coverStock, rates);
+      if (covBest) {
+        cost += covBest.cost;
+        // Booklets: only the cover is laminated, outside face
+        cost += laminationCost(lamination, covBest.name, covBest.sheets, 1, rates);
+      }
       const bindRate = rates.bind[bindType] || 0;
       if (bindRate) cost += bindRate * qty;
+    } else {
+      cost += laminationCost(lamination, best.name, best.sheets, duplex ? 2 : 1, rates);
     }
     if (isFold) cost += rates.fold * qty;
 
@@ -221,23 +260,25 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult }) {
       qty,
       sheet:   best.name,
     };
-  }, [isLF, jobType, dims, qty, leavesPerCopy, duplex, stock, isBook, isFold, bindType, spine, activeMat, lfWidth, lfHeight, lfUnit, rates]);
+  }, [isLF, jobType, dims, qty, leavesPerCopy, duplex, stock, isBook, isFold, bindType, spine, coverStock, covDuplex, lamination, activeMat, lfWidth, lfHeight, lfUnit, rates]);
 
   // Notify parent whenever the result or key config changes
   useEffect(() => {
     if (!onResult) return;
     if (!result) { onResult(null); return; }
-    const jobLabel = JOB_TYPES.find((t) => t.value === jobType)?.label || jobType;
     const size = isLF
-      ? `${lfWidth}×${lfHeight} ${lfUnit}`
-      : sizeKey === "Custom" ? `${customW}×${customH} mm` : sizeKey;
+      ? `${lfWidth}${lfUnit} × ${lfHeight}${lfUnit}`
+      : sizeKey === "Custom" ? `Custom (${fmtDims(customW, customH, "mm", dimUnit)})` : digitalSizeLabel(sizeKey, dimUnit);
     onResult({
       jobType, jobLabel, size, qty,
       paper:    isLF ? activeMat : stock,
       duplex:   isLF ? false : duplex,
       pages:    isBook ? normPages : null,
       bindType: isBook ? bindType : null,
-      area:     result.area  || null,
+      coverStock: isBook ? coverStock : null,
+      covDuplex:  isBook ? covDuplex  : null,
+      lamination: isLF ? null : lamination,
+      area:    result.area  || null,
       areaUnit: result.areaUnit || null,
       mat:      result.mat   || null,
       total:    result.total,
@@ -245,6 +286,45 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult }) {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
+
+  // ── Accordion: only "What do you need printed?" starts open ────────────────
+  const [openSteps, setOpenSteps] = useState(() => new Set([1]));
+  function toggleStep(n) {
+    setOpenSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(n)) next.delete(n); else next.add(n);
+      return next;
+    });
+  }
+  // "Next": close this step, open the following one
+  function nextStep(n) {
+    setOpenSteps((prev) => {
+      const next = new Set(prev);
+      next.delete(n);
+      next.add(n + 1);
+      return next;
+    });
+  }
+
+  // One-line answers shown on each step's header
+  const jobLabel = JOB_TYPES.find((t) => t.value === jobType)?.label || jobType;
+  const sizeSummary = isLF
+    ? `${lfWidth}${lfUnit} × ${lfHeight}${lfUnit} · ${qty.toLocaleString()} piece${qty !== 1 ? 's' : ''}`
+    : [
+        sizeKey === 'Custom' ? `Custom ${fmtDims(customW, customH, 'mm', dimUnit)}` : digitalSizeLabel(sizeKey, dimUnit),
+        isBook ? `${normPages} pages` : null,
+        `${qty.toLocaleString()} ${isBook ? 'books' : 'copies'}`,
+      ].filter(Boolean).join(' · ');
+  const materialSummary = isLF
+    ? activeMat
+    : isBook ? `Inside: ${stock} · Cover: ${coverStock}` : stock;
+  const finishingSummary = isLF
+    ? (jobType === 'banner' ? 'Hemming & eyelets included' : 'Cutting included')
+    : [
+        duplex ? 'Double-sided' : 'Single-sided',
+        lamination !== LAMINATION_NONE ? `${lamination} lamination` : 'No lamination',
+        isBook ? bindType : null,
+      ].filter(Boolean).join(' · ');
 
   // ── Shared style ─────────────────────────────────────────────────────────────
   const inp =
@@ -255,182 +335,251 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult }) {
   return (
     <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 space-y-5">
 
-      {/* Job type — horizontal scroll row with thumbnails */}
-      <div>
-        <label className={lbl}>What do you need printed?</label>
-        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-none">
-          {JOB_TYPES.map((t) => {
-            const thumb = quoterThumbnails[t.value];
-            const active = jobType === t.value;
-            return (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => setJobType(t.value)}
-                className={[
-                  "flex-shrink-0 flex flex-col items-center gap-1.5 rounded-xl border-2 p-2 w-[88px] transition-all",
-                  active
-                    ? "border-transparent text-white"
-                    : "border-[var(--t-border)] text-[var(--t-text2)] bg-[var(--t-surface)] hover:border-brand-red/40",
-                ].join(" ")}
-                style={active ? { background: accent, borderColor: accent } : {}}
-              >
-                <div className={[
-                  "w-14 h-14 rounded-lg overflow-hidden flex items-center justify-center shrink-0",
-                  active ? "bg-white/20" : "bg-[var(--t-bg)]",
-                ].join(" ")}>
-                  {thumb ? (
-                    <img src={thumb} alt={t.label} className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="text-2xl">{
-                      { flyer: '🗞️', card: '💳', brochure: '📖', trifold: '📋',
-                        book: '📚', banner: '🖼️', sticker: '🏷️', custom: '✏️' }[t.value] || '🖨️'
-                    }</span>
-                  )}
-                </div>
-                <span className="text-[10px] font-semibold text-center leading-tight line-clamp-2">{t.label}</span>
-              </button>
-            );
-          })}
-        </div>
+      {/* Scope note: Live Quote prices digital work only */}
+      <div className="flex items-start gap-3 rounded-lg border border-[var(--t-border)] bg-[var(--t-bg)] px-4 py-3">
+        <Info size={16} className="mt-0.5 shrink-0 text-[var(--t-text2)]" aria-hidden="true" />
+        <p className="text-xs leading-relaxed text-[var(--t-text2)]">
+          <strong className="font-semibold text-[var(--t-text1)]">Live Quote is for digital prints.</strong>{" "}
+          For offset printing and other large-quantity jobs,{" "}
+          {waLink ? (
+            <a href={waLink} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-2" style={{ color: accent }}>
+              contact us on WhatsApp
+            </a>
+          ) : "contact us on WhatsApp"}{" "}
+          for a tailored quote.
+        </p>
       </div>
 
-      {/* Size + quantity */}
-      {!isLF && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={lbl}>{isBook ? 'Page size' : isFold ? 'Flat (open) size' : 'Finished size'}</label>
-            <select className={inp} value={sizeKey} onChange={(e) => setSizeKey(e.target.value)}>
-              {Object.keys(SIZES).map((k) => <option key={k}>{k}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={lbl}>Quantity (copies)</label>
-            <input type="number" min="1" className={inp} value={qty}
-              onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} />
-          </div>
-          {sizeKey === 'Custom' && (
-            <>
-              <div>
-                <label className={lbl}>Width (mm)</label>
-                <input type="number" className={inp} value={customW} onChange={(e) => setCustomW(parseFloat(e.target.value) || 0)} />
-              </div>
-              <div>
-                <label className={lbl}>Height (mm)</label>
-                <input type="number" className={inp} value={customH} onChange={(e) => setCustomH(parseFloat(e.target.value) || 0)} />
-              </div>
-            </>
-          )}
-          <div>
-            <label className={lbl}>Paper</label>
-            <select className={inp} value={stock} onChange={(e) => setStock(e.target.value)}>
-              {DIGITAL_STOCK_NAMES.map((s) => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={lbl}>Printing sides</label>
-            <div className="flex gap-2">
-              {[false, true].map((d) => (
-                <button key={String(d)} type="button"
-                  onClick={() => setDuplex(d)}
+      {/* ── Step-by-step questions ── */}
+      <div className="space-y-3">
+
+        {/* 1 · What do you need printed? */}
+        <QuoteStep step={1} title="What do you need printed?" summary={jobLabel}
+          open={openSteps.has(1)} onToggle={() => toggleStep(1)} onNext={() => nextStep(1)} accent={accent}>
+          <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-none">
+            {JOB_TYPES.map((t) => {
+              const thumb = quoterThumbnails[t.value];
+              const active = jobType === t.value;
+              return (
+                <button
+                  key={t.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setJobType(t.value)}
                   className={[
-                    "flex-1 rounded-lg border px-3 py-2.5 text-xs font-medium transition-all",
-                    duplex === d ? "text-white border-transparent" : "border-[var(--t-border)] text-[var(--t-text2)] bg-[var(--t-surface)]",
+                    "flex-shrink-0 flex flex-col items-center gap-2 rounded-xl border-2 p-2 w-[170px] transition-all",
+                    active
+                      ? "border-transparent text-white"
+                      : "border-[var(--t-border)] text-[var(--t-text2)] bg-[var(--t-surface)] hover:border-brand-red/40",
                   ].join(" ")}
-                  style={duplex === d ? { background: accent, borderColor: accent } : {}}
+                  style={active ? { background: accent, borderColor: accent } : {}}
                 >
-                  {d ? 'Double-sided' : 'Single-sided'}
+                  <div className={[
+                    "w-[150px] h-[150px] rounded-lg overflow-hidden flex items-center justify-center shrink-0",
+                    active ? "bg-white/20" : "bg-[var(--t-bg)]",
+                  ].join(" ")}>
+                    {thumb ? (
+                      <img src={thumb} alt={t.label} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-6xl">{
+                        { flyer: '🗞️', card: '💳', brochure: '📖', trifold: '📋',
+                          book: '📚', banner: '🖼️', sticker: '🏷️', custom: '✏️' }[t.value] || '🖨️'
+                      }</span>
+                    )}
+                  </div>
+                  <span className="text-xs font-semibold text-center leading-tight line-clamp-2">{t.label}</span>
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
-        </div>
-      )}
+        </QuoteStep>
 
-      {/* Book extras */}
-      {isBook && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={lbl}>Number of pages</label>
-            <input type="number" min="1" className={inp} value={pages}
-              onChange={(e) => setPages(Math.max(1, parseInt(e.target.value) || 1))} />
-            <p className="text-[10px] text-[var(--t-muted)] mt-1">Rounded to nearest {bindType === 'Saddle stitch' ? '4' : '2'}.</p>
-          </div>
-          <div>
-            <label className={lbl}>Binding type</label>
-            <select className={inp} value={bindType} onChange={(e) => setBindType(e.target.value)}>
-              {Object.keys(rates.bind).map((b) => <option key={b}>{b}</option>)}
-            </select>
-          </div>
-          {bindType === 'Perfect bound' && (
-            <div>
-              <label className={lbl}>Spine width (mm)</label>
-              <input type="number" min="0" className={inp} value={spine}
-                onChange={(e) => setSpine(parseFloat(e.target.value) || 0)} />
+        {/* 2 · Size and quantity */}
+        <QuoteStep step={2} title="What is the size and quantity?" summary={sizeSummary}
+          open={openSteps.has(2)} onToggle={() => toggleStep(2)} onNext={() => nextStep(2)} accent={accent}>
+          {!isLF ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className={lbl}>{isBook ? 'Page size' : isFold ? 'Flat (open) size' : 'Finished size'}</label>
+                <div className="flex gap-2">
+                  <select className={inp} value={sizeKey} onChange={(e) => setSizeKey(e.target.value)}>
+                    {Object.keys(SIZES).map((k) => <option key={k} value={k}>{digitalSizeLabel(k, dimUnit)}</option>)}
+                  </select>
+                  <UnitSelect value={dimUnit} onChange={setDimUnit} ariaLabel="Size unit"
+                    className={inp + " !w-auto shrink-0"} />
+                </div>
+              </div>
+              <div>
+                <label className={lbl}>Quantity ({isBook ? 'books' : 'copies'})</label>
+                <input type="number" min="1" className={inp} value={qty}
+                  onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} />
+              </div>
+              {sizeKey === 'Custom' && (
+                <>
+                  <div>
+                    <label className={lbl}>Width ({dimUnit})</label>
+                    <DimensionInput className={inp} value={customW} baseUnit="mm" displayUnit={dimUnit} onChange={setCustomW} />
+                  </div>
+                  <div>
+                    <label className={lbl}>Height ({dimUnit})</label>
+                    <DimensionInput className={inp} value={customH} baseUnit="mm" displayUnit={dimUnit} onChange={setCustomH} />
+                  </div>
+                </>
+              )}
+              {isBook && (
+                <div>
+                  <label className={lbl}>Number of pages</label>
+                  <input type="number" min="1" className={inp} value={pages}
+                    onChange={(e) => setPages(Math.max(1, parseInt(e.target.value) || 1))} />
+                  <p className="text-[10px] text-[var(--t-muted)] mt-1">
+                    Rounded up to the nearest {bindType === 'Saddle stitch' ? '4' : '2'}{normPages !== pages ? ` (${normPages} pages)` : ''}.
+                  </p>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Large format */}
-      {isLF && (
-        <div className="space-y-4">
-          {/* Standard size presets for sticker */}
-          {jobType === 'sticker' && (
-            <div>
-              <label className={lbl}>Standard size presets</label>
-              <div className="flex flex-wrap gap-2">
-                {STICKER_SIZE_PRESETS.map(({ label, w, h }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => { setLfWidth(w); setLfHeight(h); setLfUnit('mm'); }}
-                    className={[
-                      "rounded-lg border px-3 py-1.5 text-xs font-medium transition-all",
-                      lfUnit === 'mm' && lfWidth === w && lfHeight === h
-                        ? "text-white border-transparent"
-                        : "border-[var(--t-border)] text-[var(--t-text2)] bg-[var(--t-surface)] hover:border-brand-red/40",
-                    ].join(" ")}
-                    style={lfUnit === 'mm' && lfWidth === w && lfHeight === h ? { background: accent } : {}}
-                  >
-                    {label} ({w}×{h})
-                  </button>
-                ))}
+          ) : (
+            <div className="space-y-4">
+              {jobType === 'sticker' && (
+                <div>
+                  <label className={lbl}>Standard size presets</label>
+                  <div className="flex flex-wrap gap-2">
+                    {STICKER_SIZE_PRESETS.map(({ label, w, h }) => {
+                      // Presets are in mm; fill them in using whatever unit is selected
+                      const on = Math.abs(convertLength(lfWidth, lfUnit, 'mm') - w) < 0.5
+                              && Math.abs(convertLength(lfHeight, lfUnit, 'mm') - h) < 0.5;
+                      return (
+                        <button
+                          key={label}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => { setLfWidth(convertLength(w, 'mm', lfUnit)); setLfHeight(convertLength(h, 'mm', lfUnit)); }}
+                          className={[
+                            "rounded-lg border px-3 py-1.5 text-xs font-medium transition-all",
+                            on
+                              ? "text-white border-transparent"
+                              : "border-[var(--t-border)] text-[var(--t-text2)] bg-[var(--t-surface)] hover:border-brand-red/40",
+                          ].join(" ")}
+                          style={on ? { background: accent } : {}}
+                        >
+                          {label} ({fmtDims(w, h, 'mm', lfUnit)})
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <label className={lbl}>Width ({lfUnit})</label>
+                  <input type="number" step="any" min="0" className={inp} value={lfWidth}
+                    onChange={(e) => setLfWidth(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div>
+                  <label className={lbl}>Height ({lfUnit})</label>
+                  <input type="number" step="any" min="0" className={inp} value={lfHeight}
+                    onChange={(e) => setLfHeight(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div>
+                  <label className={lbl}>Unit</label>
+                  <UnitSelect value={lfUnit} onChange={changeLfUnit} units={UNIT_KEYS} ariaLabel="Banner or sticker unit" className={inp} />
+                </div>
+                <div>
+                  <label className={lbl}>Quantity</label>
+                  <input type="number" min="1" className={inp} value={qty}
+                    onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} />
+                </div>
               </div>
             </div>
           )}
+        </QuoteStep>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div>
-              <label className={lbl}>Width</label>
-              <input type="number" step="0.01" className={inp} value={lfWidth}
-                onChange={(e) => setLfWidth(parseFloat(e.target.value) || 0)} />
+        {/* 3 · Material */}
+        <QuoteStep step={3} title="What material should be used for your job?" summary={materialSummary}
+          open={openSteps.has(3)} onToggle={() => toggleStep(3)} onNext={() => nextStep(3)} accent={accent}>
+          <GrammageNote isLF={isLF} />
+          {!isLF ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className={lbl}>{isBook ? 'Inside pages paper' : 'Paper'}</label>
+                <select className={inp} value={stock} onChange={(e) => setStock(e.target.value)}>
+                  {DIGITAL_STOCK_NAMES.map((s) => <option key={s} value={s}>{paperOption(s)}</option>)}
+                </select>
+                <FeelHint name={stock} />
+              </div>
+              {isBook && (
+                <div>
+                  <label className={lbl}>Cover paper</label>
+                  <select className={inp} value={coverStock} onChange={(e) => setCoverStock(e.target.value)}>
+                    {DIGITAL_STOCK_NAMES.map((s) => <option key={s} value={s}>{paperOption(s)}</option>)}
+                  </select>
+                  <FeelHint name={coverStock} />
+                </div>
+              )}
             </div>
-            <div>
-              <label className={lbl}>Height</label>
-              <input type="number" step="0.01" className={inp} value={lfHeight}
-                onChange={(e) => setLfHeight(parseFloat(e.target.value) || 0)} />
-            </div>
-            <div>
-              <label className={lbl}>Unit</label>
-              <select className={inp} value={lfUnit} onChange={(e) => setLfUnit(e.target.value)}>
-                {Object.keys(UNIT_TO_M).map((u) => <option key={u}>{u}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={lbl}>Quantity</label>
-              <input type="number" min="1" className={inp} value={qty}
-                onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} />
-            </div>
-            <div className="col-span-2">
+          ) : (
+            <div className="sm:max-w-xs">
               <label className={lbl}>Material</label>
               <select className={inp} value={activeMat} onChange={(e) => setLfMat(e.target.value)}>
                 {lfMaterials.map((m) => <option key={m}>{m}</option>)}
               </select>
+              <FeelHint name={activeMat} />
             </div>
-          </div>
-        </div>
-      )}
+          )}
+        </QuoteStep>
+
+        {/* 4 · Finishing */}
+        <QuoteStep step={4} title="What finishing do you want?" summary={finishingSummary}
+          open={openSteps.has(4)} onToggle={() => toggleStep(4)} accent={accent}>
+          {!isLF ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className={lbl}>{isBook ? 'Inside pages printing' : 'Printing sides'}</label>
+                <ChoiceRow value={duplex} onChange={setDuplex} accent={accent}
+                  options={[[false, 'Single-sided'], [true, 'Double-sided']]} />
+              </div>
+              <div>
+                <label className={lbl}>{isBook ? 'Cover lamination' : 'Lamination'}</label>
+                <select className={inp} value={lamination} onChange={(e) => setLamination(e.target.value)}>
+                  {laminationOptions(rates).map((l) => <option key={l}>{l}</option>)}
+                </select>
+              </div>
+              {isBook && (
+                <>
+                  <div className="sm:col-span-2">
+                    <label className={lbl}>Cover printing</label>
+                    <ChoiceRow value={covDuplex} onChange={setCovDuplex} accent={accent}
+                      options={[[false, 'Single-sided (outside)'], [true, 'Double-sided (in + out)']]} />
+                  </div>
+                  <div>
+                    <label className={lbl}>Binding type</label>
+                    <select className={inp} value={bindType} onChange={(e) => setBindType(e.target.value)}>
+                      {Object.keys(rates.bind).map((b) => <option key={b}>{b}</option>)}
+                    </select>
+                  </div>
+                  {bindType === 'Perfect bound' && (
+                    <div>
+                      <label className={lbl}>Spine width (mm)</label>
+                      <input type="number" min="0" className={inp} value={spine}
+                        onChange={(e) => setSpine(parseFloat(e.target.value) || 0)} />
+                    </div>
+                  )}
+                </>
+              )}
+              {isFold && (
+                <p className="sm:col-span-2 text-xs text-[var(--t-muted)]">
+                  Folding ({jobType === 'trifold' ? 'tri-fold' : 'bi-fold'}) is included in the price.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-[var(--t-text2)]">
+              {jobType === 'banner'
+                ? 'Hemming and eyelets are included with every banner.'
+                : 'Cutting to size is included with every sticker.'}
+            </p>
+          )}
+        </QuoteStep>
+      </div>
 
       {/* ── Price result ── */}
       {result ? (
@@ -458,7 +607,7 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult }) {
           </div>
           <div className="bg-[var(--t-surface)] border-l border-r border-b border-[var(--t-border)] rounded-b-2xl px-5 py-3">
             <p className="text-xs text-[var(--t-muted)]">
-              This is an instant estimate. Final price confirmed when your order is placed.
+              This is a live estimate. Final price confirmed when your order is placed.
               {" "}<strong className="text-[var(--t-text2)]">Contact us to get started.</strong>
             </p>
           </div>
@@ -472,6 +621,90 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult }) {
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Accordion step ───────────────────────────────────────────────────────────
+function QuoteStep({ step, title, summary, open, onToggle, onNext, accent, children }) {
+  const panelId  = `live-quote-step-${step}`;
+  const headerId = `${panelId}-header`;
+  return (
+    <section className="overflow-hidden rounded-xl border border-[var(--t-border)] bg-[var(--t-surface)]">
+      <h3>
+        <button type="button" id={headerId} aria-expanded={open} aria-controls={panelId} onClick={onToggle}
+          className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[var(--t-bg)] sm:px-5">
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors"
+            style={open ? { background: accent, color: "#fff" } : { background: "var(--t-bg)", color: "var(--t-text2)", boxShadow: "inset 0 0 0 1px var(--t-border)" }}>
+            {step}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-[var(--t-text1)]">{title}</span>
+            {!open && summary && <span className="mt-0.5 block truncate text-xs text-[var(--t-muted)]">{summary}</span>}
+          </span>
+          <ChevronDown size={18} aria-hidden="true"
+            className={`shrink-0 text-[var(--t-muted)] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        </button>
+      </h3>
+
+      {/* Height animates via grid rows; collapsed content is inert (no focus / screen reader) */}
+      <div id={panelId} role="region" aria-labelledby={headerId} inert={!open}
+        className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div className="overflow-hidden">
+          <div className="border-t border-[var(--t-border)] px-4 pb-4 pt-4 sm:px-5">
+            {children}
+            {onNext && (
+              <div className="mt-4 flex justify-end">
+                <button type="button" onClick={onNext}
+                  className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ background: accent }}>
+                  Next <ChevronRight size={14} aria-hidden="true" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// "What does gsm mean?" — shown at the top of the Material step
+function GrammageNote({ isLF }) {
+  return (
+    <div className="mb-4 flex items-start gap-3 rounded-lg border border-[var(--t-border)] bg-[var(--t-bg)] px-3.5 py-3">
+      <Info size={16} className="mt-0.5 shrink-0 text-[var(--t-text2)]" aria-hidden="true" />
+      <p className="text-xs leading-relaxed text-[var(--t-text2)]">
+        <strong className="font-semibold text-[var(--t-text1)]">gsm = thickness.</strong>{" "}
+        The higher the number, the thicker the {isLF ? 'material' : 'paper'} and the higher the cost.
+      </p>
+    </div>
+  );
+}
+
+function FeelHint({ name }) {
+  const f = paperFeel(name);
+  if (!f) return null;
+  return <p className="mt-1 text-[11px] text-[var(--t-muted)]">{f.feel}</p>;
+}
+
+// Two-option toggle (single / double-sided)
+function ChoiceRow({ value, onChange, options, accent }) {
+  return (
+    <div className="flex gap-2">
+      {options.map(([v, label]) => (
+        <button key={String(v)} type="button" aria-pressed={value === v}
+          onClick={() => onChange(v)}
+          className={[
+            "flex-1 rounded-lg border px-3 py-2.5 text-xs font-medium transition-all",
+            value === v ? "text-white border-transparent" : "border-[var(--t-border)] text-[var(--t-text2)] bg-[var(--t-surface)]",
+          ].join(" ")}
+          style={value === v ? { background: accent, borderColor: accent } : {}}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
