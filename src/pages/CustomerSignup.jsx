@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { signUpCustomer, getProfile, signOut } from "../lib/auth.js";
+import { signUpCustomer } from "../lib/auth.js";
+import { completeGoogleSignIn } from "../lib/googleOneTap.js";
 import { getRouteForRole } from "../lib/routes.js";
 import { useAuth } from "../components/AuthProvider.jsx";
 import { GoogleSignIn, OrDivider } from "../components/GoogleSignIn.jsx";
@@ -24,13 +25,7 @@ export function CustomerSignup() {
   async function handleGoogle(user) {
     setError("");
     try {
-      const profile = await getProfile(user.id);
-      if (!profile?.role) { setError("Your account was created but has no profile yet. Please try signing in."); return; }
-      if (profile.is_active === false) {
-        await signOut();
-        setError("This account has been deactivated. Contact us for help.");
-        return;
-      }
+      const profile = await completeGoogleSignIn(user);
       setProfile(profile);
       navigate(getRouteForRole(profile.role), { replace: true });
     } catch (err) {

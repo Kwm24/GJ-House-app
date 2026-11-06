@@ -5,6 +5,7 @@ import { getRouteForRole } from "../lib/routes.js";
 import { useAuth } from "../components/AuthProvider.jsx";
 import { LoadingScreen } from "../components/LoadingScreen.jsx";
 import { GoogleSignIn, OrDivider } from "../components/GoogleSignIn.jsx";
+import { completeGoogleSignIn } from "../lib/googleOneTap.js";
 
 export function Login() {
   const navigate = useNavigate();
@@ -28,27 +29,13 @@ export function Login() {
     return <Navigate to={getRouteForRole(profile.role)} replace />;
   }
 
-  // Shared by email and Google sign-in: load the profile and route by role
-  async function finishSignIn(signedInUser) {
-    const userProfile = await getProfile(signedInUser.id);
-
-    if (!userProfile?.role) {
-      setError("Your account has no role assigned. Contact your administrator.");
-      return;
-    }
-    if (userProfile.is_active === false) {
-      await signOut();
-      setError("Your account has been deactivated. Contact your administrator.");
-      return;
-    }
-    setProfile(userProfile);
-    navigate(getRouteForRole(userProfile.role), { replace: true });
-  }
-
+  // Google is customers-only; staff are turned away inside completeGoogleSignIn
   async function handleGoogle(signedInUser) {
     setError("");
     try {
-      await finishSignIn(signedInUser);
+      const userProfile = await completeGoogleSignIn(signedInUser);
+      setProfile(userProfile);
+      navigate(getRouteForRole(userProfile.role), { replace: true });
     } catch (err) {
       setError(err.message ?? "Could not sign in with Google.");
     }

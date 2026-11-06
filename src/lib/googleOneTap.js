@@ -11,10 +11,12 @@
  *      same Client ID (and secret).
  *   3. .env.local → VITE_GOOGLE_CLIENT_ID=<the client ID>
  *
- * New Google users get a "customer" profile from the handle_new_user trigger
- * (no role in their metadata); the trigger also picks up Google's full_name.
+ * Google sign-in is for CUSTOMERS only (staff use the email form). After
+ * Google signs someone in, completeGoogleSignIn() makes sure they have a
+ * customer profile (migration 038) and turns away any staff account.
  */
 import { supabase } from "./supabase.js";
+import { getProfile, signOut } from "./auth.js";
 
 export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
@@ -54,4 +56,37 @@ export async function signInWithGoogleCredential(credential, rawNonce) {
   });
   if (error) throw error;
   return data;
+}
+
+/**
+ * Finish a Google sign-in: return the user's customer profile, creating it if
+ * it doesn't exist yet. Staff accounts are signed out again with a message.
+ */
+export async function completeGoogleSignIn(user) {
+  let profile = await getProfile(user.id);
+
+  if (!profile) {
+    const { data, error } = await supabase.rpc("ensure_customer_profile");
+    if (error) {
+      await signOut();
+      throw new Error(/ensure_customer_profile/i.test(error.message)
+        ? "Google sign-in isn't fully set up yet (database update 038 is missing). Please use email for now."
+        : error.message);
+    }
+    profile = Array.isArray(data) ? data[0] : data;
+  }
+
+  if (!profile?.role) {
+    await signOut();
+    throw new Error("We couldn't set up your account. Please try again or sign up with email.");
+  }
+  if (profile.role !== "customer") {
+    await signOut();
+    throw new Error("Google sign-in is for customers. Staff, please sign in with your email and password.");
+  }
+  if (profile.is_active === false) {
+    await signOut();
+    throw new Error("This account has been deactivated. Contact us for help.");
+  }
+  return profile;
 }
