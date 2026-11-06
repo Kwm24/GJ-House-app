@@ -16,7 +16,7 @@
  * customer profile (migration 038) and turns away any staff account.
  */
 import { supabase } from "./supabase.js";
-import { getProfile, signOut } from "./auth.js";
+import { signOut } from "./auth.js";
 
 export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
@@ -58,35 +58,69 @@ export async function signInWithGoogleCredential(credential, rawNonce) {
   return data;
 }
 
+// After turning an account away, stop One Tap from auto-signing the same
+// Google account straight back in (the sign-in / sign-out loop on phones).
+function rejectGoogle() {
+  try { window.google?.accounts?.id?.disableAutoSelect(); } catch { /* ignore */ }
+  return signOut();
+}
+
 /**
  * Finish a Google sign-in: return the user's customer profile, creating it if
- * it doesn't exist yet. Staff accounts are signed out again with a message.
+ * it doesn't exist yet (ensure_customer_profile, migration 038 — it returns
+ * the existing profile untouched if there is one). Staff accounts are signed
+ * out again with a message.
+ *
+ * Uses the access token from the sign-in response directly rather than
+ * reading the session back from storage, so a storage hiccup can't turn this
+ * request anonymous.
  */
-export async function completeGoogleSignIn(user) {
-  let profile = await getProfile(user.id);
-
-  if (!profile) {
-    const { data, error } = await supabase.rpc("ensure_customer_profile");
-    if (error) {
-      await signOut();
-      throw new Error(/ensure_customer_profile/i.test(error.message)
-        ? "Google sign-in isn't fully set up yet (database update 038 is missing). Please use email for now."
-        : error.message);
-    }
-    profile = Array.isArray(data) ? data[0] : data;
+export async function completeGoogleSignIn(user, session) {
+  const token = session?.access_token;
+  if (!token) {
+    await rejectGoogle();
+    throw new Error("Google signed you in, but no session came back. Please try again.");
   }
 
+  // A fresh session lasts about an hour. If it already looks (nearly) expired,
+  // this device's clock is ahead — the app can't keep anyone signed in then.
+  if (session.expires_at && session.expires_at * 1000 - Date.now() < 60_000) {
+    await rejectGoogle();
+    throw new Error("Your device's date and time look wrong, so we can't keep you signed in. Set the clock to update automatically, then try again.");
+  }
+
+  const { data, error } = await supabase
+    .rpc("ensure_customer_profile")
+    .setHeader("Authorization", `Bearer ${token}`);
+
+  if (error) {
+    console.error("[Google sign-in] ensure_customer_profile failed:", error);
+    await rejectGoogle();
+    if (error.code === "PGRST202") {
+      throw new Error("Google sign-in isn't fully set up yet (database update 038 is missing). Please use email for now.");
+    }
+    throw new Error(`We couldn't open your account (${error.message}). Please try again or sign in with email.`);
+  }
+  const profile = Array.isArray(data) ? data[0] : data;
+
   if (!profile?.role) {
-    await signOut();
+    await rejectGoogle();
     throw new Error("We couldn't set up your account. Please try again or sign up with email.");
   }
   if (profile.role !== "customer") {
-    await signOut();
-    throw new Error("Google sign-in is for customers. Staff, please sign in with your email and password.");
+    await rejectGoogle();
+    const email = profile.email || user?.email;
+    throw new Error(`${email ? `${email} is a staff account. ` : ""}Google sign-in is for customers only. Staff, please sign in with your email and password on your lobby's login page, or use a different Google account.`);
   }
   if (profile.is_active === false) {
-    await signOut();
+    await rejectGoogle();
     throw new Error("This account has been deactivated. Contact us for help.");
   }
+
+  // The rest of the app reads the session from storage. Warn (in the console)
+  // if it isn't there, so the cause is visible.
+  const { data: stored } = await supabase.auth.getSession();
+  if (!stored?.session) console.warn("[Google sign-in] Signed in, but the session wasn't kept in browser storage.");
+
   return profile;
 }

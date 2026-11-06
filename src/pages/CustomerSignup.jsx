@@ -22,10 +22,10 @@ export function CustomerSignup() {
 
   // Google: the account (customer profile) is created on first sign-in,
   // so go straight into the portal
-  async function handleGoogle(user) {
+  async function handleGoogle(user, session) {
     setError("");
     try {
-      const profile = await completeGoogleSignIn(user);
+      const profile = await completeGoogleSignIn(user, session);
       setProfile(profile);
       navigate(getRouteForRole(profile.role), { replace: true });
     } catch (err) {

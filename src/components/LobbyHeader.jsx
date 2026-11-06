@@ -4,6 +4,7 @@ import { useAuth } from "./AuthProvider.jsx";
 import { NotificationBell } from "./NotificationBell.jsx";
 import { ThemeToggle } from "./ThemeToggle.jsx";
 import { getSettings, applyFavicon } from "../lib/settings.js";
+import { getLoginRouteForRole } from "../lib/routes.js";
 
 export function LobbyHeader({ title, subtitle, onNavigateToJob }) {
   const navigate = useNavigate();
@@ -25,8 +26,9 @@ export function LobbyHeader({ title, subtitle, onNavigateToJob }) {
   const showAdminBackLink = profile?.role === "admin" && !location.pathname.startsWith("/admin");
 
   async function handleSignOut() {
+    const loginPath = getLoginRouteForRole(profile?.role);   // staff go back to their lobby's login
     await signOut();
-    navigate("/login", { replace: true });
+    navigate(loginPath, { replace: true });
   }
 
   return (

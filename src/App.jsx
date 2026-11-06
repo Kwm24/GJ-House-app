@@ -22,6 +22,7 @@ import { AccountsPage } from "./pages/AccountsPage.jsx";
 import { AccountsLogin } from "./pages/AccountsLogin.jsx";
 import { CustomerPage } from "./pages/CustomerPage.jsx";
 import { AdminPage } from "./pages/AdminPage.jsx";
+import { AdminLogin } from "./pages/AdminLogin.jsx";
 
 export function App() {
   return (
@@ -46,6 +47,7 @@ export function App() {
           <Route path="/production/login"    element={<ProductionLogin />} />
           <Route path="/production/signup"   element={<ProductionSignup />} />
           <Route path="/accounts/login"      element={<AccountsLogin />} />
+          <Route path="/admin/login"         element={<AdminLogin />} />
 
           <Route element={<ProtectedRoute />}>
             <Route element={<DashboardLayout />}>
@@ -92,7 +94,7 @@ export function App() {
               <Route
                 path="/admin"
                 element={
-                  <ProtectedRoute allowedRoles={["admin"]}>
+                  <ProtectedRoute allowedRoles={["admin"]} loginPath="/admin/login">
                     <AdminPage />
                   </ProtectedRoute>
                 }

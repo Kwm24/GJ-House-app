@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { signInWithEmail, getProfile, signOut } from "../lib/auth.js";
-import { getRouteForRole } from "../lib/routes.js";
+import { getRouteForRole, getLoginRouteForRole, ROLE_LABELS } from "../lib/routes.js";
 import { useAuth } from "../components/AuthProvider.jsx";
 import { LoadingScreen } from "../components/LoadingScreen.jsx";
 import { GoogleSignIn, OrDivider } from "../components/GoogleSignIn.jsx";
@@ -14,26 +14,31 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [staffRole, setStaffRole] = useState(null);   // set when a staff account tries to sign in here
+
+  // Only customers are forwarded from here; a staff account is turned away
+  // (and signed out) in handleSubmit / completeGoogleSignIn instead.
+  const isCustomer = profile?.role === "customer";
 
   useEffect(() => {
-    if (!loading && user && profile) {
-      navigate(getRouteForRole(profile.role), { replace: true });
+    if (!loading && user && isCustomer) {
+      navigate(getRouteForRole("customer"), { replace: true });
     }
-  }, [loading, user, profile, navigate]);
+  }, [loading, user, isCustomer, navigate]);
 
   if (loading) {
     return <LoadingScreen message="Loading…" />;
   }
 
-  if (user && profile) {
-    return <Navigate to={getRouteForRole(profile.role)} replace />;
+  if (user && isCustomer) {
+    return <Navigate to={getRouteForRole("customer")} replace />;
   }
 
   // Google is customers-only; staff are turned away inside completeGoogleSignIn
-  async function handleGoogle(signedInUser) {
+  async function handleGoogle(signedInUser, session) {
     setError("");
     try {
-      const userProfile = await completeGoogleSignIn(signedInUser);
+      const userProfile = await completeGoogleSignIn(signedInUser, session);
       setProfile(userProfile);
       navigate(getRouteForRole(userProfile.role), { replace: true });
     } catch (err) {
@@ -44,6 +49,7 @@ export function Login() {
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setStaffRole(null);
     setSubmitting(true);
 
     try {
@@ -58,6 +64,13 @@ export function Login() {
       if (userProfile.is_active === false) {
         await signOut();
         setError("Your account has been deactivated. Contact your administrator.");
+        return;
+      }
+
+      // This page is for customers; staff are sent to their own lobby login
+      if (userProfile.role !== "customer") {
+        await signOut();
+        setStaffRole(userProfile.role);
         return;
       }
 
@@ -80,7 +93,7 @@ export function Login() {
           Sign in
         </h1>
         <p className="mt-2 text-sm text-brand-cream/60">
-          Ghana print press — staff &amp; customer portal
+          Customer portal: track your orders and quotes
         </p>
       </div>
 
@@ -94,6 +107,15 @@ export function Login() {
             className="rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-3"
           >
             {error}
+          </div>
+        )}
+
+        {staffRole && (
+          <div role="alert" className="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm px-4 py-3">
+            This sign-in is for customers. {ROLE_LABELS[staffRole] ?? "Staff"} accounts sign in at{" "}
+            <Link to={getLoginRouteForRole(staffRole)} className="font-semibold underline">
+              {getLoginRouteForRole(staffRole)}
+            </Link>.
           </div>
         )}
 
@@ -154,7 +176,7 @@ export function Login() {
         </Link>
       </p>
       <p className="mt-3 text-center text-xs text-brand-cream/40">
-        Staff? Contact your system administrator for access.
+        Staff? Sign in from your lobby's own login page.
       </p>
     </div>
   );

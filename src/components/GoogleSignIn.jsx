@@ -2,7 +2,7 @@
  * GoogleSignIn.jsx
  * Shows Google One Tap on page load plus a "Sign in with Google" button (for
  * when One Tap is dismissed or blocked). On success the user is signed into
- * Supabase and `onSignedIn(user)` is called. Renders nothing when
+ * Supabase and `onSignedIn(user, session)` is called. Renders nothing when
  * VITE_GOOGLE_CLIENT_ID isn't configured.
  */
 import { useEffect, useRef, useState } from "react";
@@ -36,8 +36,8 @@ export function GoogleSignIn({ mode = "signin", onSignedIn, onError, oneTap = tr
           callback: async ({ credential }) => {
             setBusy(true);
             try {
-              const { user } = await signInWithGoogleCredential(credential, nonce.raw);
-              cb.current.onSignedIn?.(user);
+              const { user, session } = await signInWithGoogleCredential(credential, nonce.raw);
+              await cb.current.onSignedIn?.(user, session);
             } catch (err) {
               cb.current.onError?.(err.message ?? "Google sign-in failed.");
             } finally {

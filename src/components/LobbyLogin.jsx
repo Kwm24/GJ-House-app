@@ -163,9 +163,9 @@ export function LobbyLogin({ icon, title, subtitle, requiredRole, lobbyPath, sig
       {/* Footer links */}
       <div className="relative w-full max-w-md mt-5 flex flex-col items-center gap-2 text-center">
         <p className="text-xs text-white/30">
-          Wrong lobby?{" "}
+          Not staff?{" "}
           <Link to="/login" className="text-white/50 hover:text-white underline transition-colors">
-            Go to main login
+            Customer sign-in
           </Link>
         </p>
         <p className="text-xs text-white/20">
