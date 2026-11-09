@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Image, Trash2, ExternalLink, Upload, Eye, EyeOff } from "lucide-react";
-import { getSettings, updateSettings, uploadLandingImage, uploadServiceImage, uploadStepImage, uploadCompanyLogo, uploadFavicon, applyFavicon } from "../../lib/settings.js";
+import { getSettings, updateSettings, uploadLandingImage, uploadServiceImage, uploadStepImage, uploadFeatureImage, uploadCompanyLogo, uploadFavicon, applyFavicon } from "../../lib/settings.js";
 
 const DEFAULT_LANDING = {
   hero: {
@@ -106,7 +106,7 @@ function ColorField({ label, value, onChange }) {
 }
 
 // ── Section background + image editor ────────────────────────────────────────
-function SectionBgEditor({ sectionKey, label, style, onChange, hasOverlay = true }) {
+function SectionBgEditor({ sectionKey, label, style, onChange, hasOverlay = true, allowImage = true }) {
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -216,6 +216,11 @@ function SectionBgEditor({ sectionKey, label, style, onChange, hasOverlay = true
         </div>
       </div>
 
+      {!allowImage ? (
+        <p className="mt-3 rounded-lg border border-[var(--t-border)] bg-[var(--t-bg)] px-3 py-2.5 text-xs text-[var(--t-text2)]">
+          Background: animated print-ink dot grid (cyan, magenta, yellow, black) over the background colour above. Visitors can tap it to send a ripple.
+        </p>
+      ) : (
       <div className="mt-3">
         <label className="block text-xs font-medium text-[var(--t-muted)] mb-1.5">Background image</label>
         {hasImage ? (
@@ -249,6 +254,7 @@ function SectionBgEditor({ sectionKey, label, style, onChange, hasOverlay = true
         {uploadError && <p className="mt-1.5 text-xs text-red-600">{uploadError}</p>}
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
       </div>
+      )}
     </div>
   );
 }
@@ -633,7 +639,7 @@ export function LandingPageTab() {
           <Field label="Headline" value={data.hero.headline} onChange={(v) => setHero("headline", v)} />
           <Field label="Subheading" value={data.hero.subhead} onChange={(v) => setHero("subhead", v)} multiline />
         </div>
-        <SectionBgEditor sectionKey="hero" label="Hero" style={data.section_styles.hero} onChange={(v) => setSectionStyle("hero", v)} />
+        <SectionBgEditor sectionKey="hero" label="Hero" style={data.section_styles.hero} onChange={(v) => setSectionStyle("hero", v)} hasOverlay={false} allowImage={false} />
       </SectionCard>
 
       {/* ── Stats ── */}
@@ -674,6 +680,13 @@ export function LandingPageTab() {
             <div key={i} className="rounded-lg border border-[var(--t-border)] p-3 space-y-2">
               <Field label={`Feature ${i + 1} Title`} value={feat.title} onChange={(v) => setFeature(i, "title", v)} />
               <Field label="Description" value={feat.description} onChange={(v) => setFeature(i, "description", v)} multiline />
+              <ServiceImageUploader
+                index={i}
+                imageUrl={feat.image_url || ""}
+                onChange={(url) => setFeature(i, "image_url", url)}
+                upload={uploadFeatureImage}
+                alt={`Feature ${i + 1} preview`}
+              />
             </div>
           ))}
         </div>

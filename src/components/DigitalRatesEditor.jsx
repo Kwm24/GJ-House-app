@@ -1,7 +1,7 @@
 /**
  * DigitalRatesEditor.jsx
  * The Digital Print Quoter's cost settings (sheets, paper, lamination, binding,
- * banners/stickers, global settings). Used in two places with the same UI:
+ * banners/stickers, per-piece products, global settings). Used in two places with the same UI:
  *   - Admin → Settings                 (saves directly)
  *   - Production lobby → Digital rates (only for production accounts the admin
  *     has allowed; saves through the update_digital_rates() database function,
@@ -9,12 +9,16 @@
  */
 import { useEffect, useState } from "react";
 import { getSettings, saveDigitalRates } from "../lib/settings.js";
-import { DEFAULT_DIGITAL_RATES, DIGITAL_SHEET_NAMES, DIGITAL_STOCK_NAMES } from "../lib/digitalPrintSpecs.js";
+import {
+  DEFAULT_DIGITAL_RATES, DIGITAL_SHEET_NAMES, DIGITAL_STOCK_NAMES,
+  UNIT_JOB_TYPES, UNIT_JOB_LABELS, mergeDigitalRates,
+} from "../lib/digitalPrintSpecs.js";
+import { Plus, Trash2 } from "lucide-react";
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-red/40 focus:border-brand-red";
 
-export function DigitalRatesEditor({ asProduction = false }) {
+export function DigitalRatesEditor({ asProduction = false, onSaved }) {
   const [dRates, setDRates] = useState(structuredClone(DEFAULT_DIGITAL_RATES));
   const [savingDRates, setSavingDRates] = useState(false);
   const [dRatesMsg, setDRatesMsg] = useState("");
@@ -22,7 +26,7 @@ export function DigitalRatesEditor({ asProduction = false }) {
   useEffect(() => {
     getSettings()
       .then((data) => {
-        if (data?.digital_quote_rates) setDRates((r) => deepMerge(r, data.digital_quote_rates));
+        if (data?.digital_quote_rates) setDRates((r) => mergeDigitalRates(data.digital_quote_rates, r));
       })
       .catch((err) => setDRatesMsg(err.message ?? "Could not load digital rates."));
   }, []);
@@ -49,11 +53,38 @@ export function DigitalRatesEditor({ asProduction = false }) {
     setDRates((r) => ({ ...r, bind: { ...r.bind, [name]: Number(value) } }));
   }
 
+  // Per-piece item lists: [{ name, cost }]
+  function setUnitList(type, fn) {
+    setDRates((r) => ({ ...r, unit: { ...(r.unit || {}), [type]: fn([...(r.unit?.[type] || [])]) } }));
+  }
+  function setUnitItem(type, i, field, value) {
+    setUnitList(type, (list) => { list[i] = { ...list[i], [field]: field === "cost" ? Number(value) : value }; return list; });
+  }
+  function addUnitItem(type) {
+    setUnitList(type, (list) => [...list, { name: "", cost: 0 }]);
+  }
+  function removeUnitItem(type, i) {
+    setUnitList(type, (list) => list.filter((_, j) => j !== i));
+  }
+
   async function handleSaveDigitalRates() {
-    setSavingDRates(true);
     setDRatesMsg("");
+    // Item names identify the item in saved quotes, so they must be filled in and unique
+    for (const type of UNIT_JOB_TYPES) {
+      const names = (dRates.unit?.[type] || []).map((i) => (i.name || "").trim());
+      if (names.some((n) => !n)) { setDRatesMsg(`${UNIT_JOB_LABELS[type]}: every item needs a name (or remove the empty row).`); return; }
+      const dup = names.find((n, i) => names.indexOf(n) !== i);
+      if (dup) { setDRatesMsg(`${UNIT_JOB_LABELS[type]}: "${dup}" is listed twice.`); return; }
+    }
+    const toSave = {
+      ...dRates,
+      unit: Object.fromEntries(UNIT_JOB_TYPES.map((t) => [t, (dRates.unit?.[t] || []).map((i) => ({ name: i.name.trim(), cost: Number(i.cost) || 0 }))])),
+    };
+    setSavingDRates(true);
     try {
-      await saveDigitalRates(dRates, { asProduction });
+      await saveDigitalRates(toSave, { asProduction });
+      setDRates(toSave);
+      onSaved?.(toSave);
       setDRatesMsg("Digital print rates saved.");
     } catch (err) {
       const m = err.message ?? "";
@@ -204,6 +235,47 @@ export function DigitalRatesEditor({ asProduction = false }) {
         ))}
       </div>
 
+      {/* Per-piece products */}
+      <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-brand-red border-b border-gray-300 pb-1.5 mb-1">Priced per piece: cost per piece (GH₵)</h3>
+      <p className="mb-3 text-xs text-gray-600">
+        Roll-up banners, T-shirts and souvenirs are priced as cost per piece × quantity, plus the per-piece markup below.
+        Renaming an item doesn&apos;t change quotes already saved.
+      </p>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {UNIT_JOB_TYPES.map((type) => {
+          const list = dRates.unit?.[type] || [];
+          return (
+            <div key={type} className="rounded-lg border border-gray-200 bg-white/60 p-3">
+              <p className="mb-2 text-sm font-semibold text-brand-dark">{UNIT_JOB_LABELS[type]}</p>
+              <div className="space-y-2">
+                {list.map((item, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input type="text" value={item.name} placeholder="Item name"
+                      aria-label={`${UNIT_JOB_LABELS[type]} item ${i + 1} name`}
+                      onChange={(e) => setUnitItem(type, i, "name", e.target.value)}
+                      className={inputClass + " min-w-0 flex-1"} />
+                    <input type="number" step="0.01" min="0" value={item.cost}
+                      aria-label={`${item.name || "Item"} cost`}
+                      onChange={(e) => setUnitItem(type, i, "cost", e.target.value)}
+                      className={inputClass} style={{ maxWidth: 90 }} />
+                    <button type="button" onClick={() => removeUnitItem(type, i)}
+                      aria-label={`Remove ${item.name || "item"}`}
+                      className="shrink-0 rounded-md p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors">
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+                {list.length === 0 && <p className="text-xs text-gray-500">No items. Customers won&apos;t see this product until you add one.</p>}
+              </div>
+              <button type="button" onClick={() => addUnitItem(type)}
+                className="mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-semibold text-brand-red hover:bg-brand-red/10 transition-colors">
+                <Plus size={14} /> Add item
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
       {/* Global settings */}
       <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-brand-red border-b border-gray-300 pb-1.5 mb-3">Global settings</h3>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -219,6 +291,7 @@ export function DigitalRatesEditor({ asProduction = false }) {
           { key: 'stickerCut', label: 'Sticker cutting (GH₵)' },
           { key: 'lfMin',      label: 'Min. banner/sticker charge (GH₵)' },
           { key: 'lfMarkup',   label: 'Banner/sticker markup (%)' },
+          { key: 'unitMarkup', label: 'Per-piece products markup (%)' },
         ].map(({ key, label }) => (
           <div key={key}>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">{label}</label>
@@ -239,16 +312,4 @@ export function DigitalRatesEditor({ asProduction = false }) {
       </div>
     </div>
   );
-}
-
-function deepMerge(target, source) {
-  const out = { ...target };
-  for (const k of Object.keys(source)) {
-    if (source[k] !== null && typeof source[k] === "object" && !Array.isArray(source[k])) {
-      out[k] = deepMerge(target[k] || {}, source[k]);
-    } else {
-      out[k] = source[k];
-    }
-  }
-  return out;
 }

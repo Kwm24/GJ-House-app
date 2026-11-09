@@ -22,17 +22,17 @@ import {
 } from "../lib/jobs.js";
 import { listJobFiles, listCustomerUploadedFiles, getJobFileSignedUrl, uploadCustomerFile, uploadDesignFile, uploadReferenceFile, recordJobFile } from "../lib/jobFiles.js";
 import { listCustomerDocuments, TYPE_COLORS, STATUS_COLORS as INV_STATUS_COLORS } from "../lib/invoices.js";
-import { listPublicItems } from "../lib/items.js";
+import { RatesView } from "../components/RatesView.jsx";
 import { getSettings } from "../lib/settings.js";
 import { signOut } from "../lib/auth.js";
 import { useNavigate } from "react-router-dom";
 import {
   Briefcase, FileText, Tag, ArrowLeft, CheckCircle2, Clock, Download,
-  Send, CreditCard, Palette, Printer, Scissors, Package, Truck, Star, Calculator,
-} from "lucide-react";
+  Send, CreditCard, Palette, Printer, Scissors, Package, Truck, Star, Calculator, MapPin } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle.jsx";
 import { PeriodPicker, filterByPeriod, defaultPeriod } from "../components/PeriodPicker.jsx";
 import { InstantQuoter, buildInstantQuoteSummary } from "../components/InstantQuoter.jsx";
+import { MyDeliveryLocations, DeliveryLocationPrompt } from "../components/delivery/DeliveryLocations.jsx";
 
 // ── Production stages (maps DB status values → customer-friendly labels) ──────
 const STAGES = [
@@ -1165,128 +1165,6 @@ function JobCard({ job, onClick }) {
   );
 }
 
-// ── Rates tab — public price list (masonry ecommerce layout) ─────────────────
-function RatesView() {
-  const [items,   setItems]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState("");
-
-  useEffect(() => {
-    listPublicItems()
-      .then(setItems)
-      .catch((err) => setError(err.message ?? "Could not load rates."))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
-    return (
-      <div style={{ columns: "2 160px", gap: "12px" }}>
-        {[1,2,3,4,5,6].map((i) => (
-          <div key={i} className="rounded-xl bg-gray-200 dark:bg-white/10 animate-pulse"
-            style={{ height: i % 2 === 0 ? 200 : 140, breakInside: "avoid", marginBottom: 12 }} />
-        ))}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-3">
-        {error}
-      </div>
-    );
-  }
-
-  if (items.length === 0) {
-    return (
-      <div className="text-center py-12 space-y-2">
-        <div className="text-4xl">🏷️</div>
-        <p className="text-sm font-medium text-[var(--t-text2)]">No rates published yet.</p>
-        <p className="text-xs text-[var(--t-muted)] max-w-xs mx-auto">
-          Our team will publish pricing information here soon.
-        </p>
-      </div>
-    );
-  }
-
-  // Group by category
-  const grouped = items.reduce((acc, item) => {
-    const key = item.category || "General";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(item);
-    return acc;
-  }, {});
-
-  return (
-    <div className="space-y-8">
-      {Object.entries(grouped).map(([category, catItems]) => (
-        <div key={category}>
-          <div className="text-xs font-bold uppercase tracking-widest text-brand-red mb-4 border-b border-[var(--t-border)] pb-2">
-            {category}
-          </div>
-
-          {/* Masonry grid */}
-          <div style={{ columns: "2 160px", gap: "12px" }}>
-            {catItems.map((item) => (
-              <div
-                key={item.id}
-                className="bg-[var(--t-surface)] rounded-xl border border-[var(--t-border)] overflow-hidden hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200"
-                style={{ breakInside: "avoid", marginBottom: "12px" }}
-              >
-                {/* Thumbnail */}
-                {item.thumbnail_url ? (
-                  <div className="w-full aspect-[4/3] overflow-hidden bg-gray-100 dark:bg-white/5">
-                    <img
-                      src={item.thumbnail_url}
-                      alt={item.name}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  </div>
-                ) : (
-                  <div className="w-full h-24 bg-gradient-to-br from-brand-red/10 to-brand-red/5 flex items-center justify-center">
-                    <span className="text-3xl opacity-40">🏷️</span>
-                  </div>
-                )}
-
-                {/* Content */}
-                <div className="p-3">
-                  <p className="font-semibold text-[var(--t-text1)] text-sm leading-snug">{item.name}</p>
-                  {item.description && (
-                    <p className="text-xs text-[var(--t-muted)] mt-0.5 leading-relaxed">{item.description}</p>
-                  )}
-                  {item.item_type === "print" && item.print_specs && (
-                    <div className="mt-1.5 space-y-0.5">
-                      {item.print_specs.material && (
-                        <p className="text-[10px] text-[var(--t-muted)]">🖨️ {item.print_specs.material}</p>
-                      )}
-                      {item.print_specs.size && (
-                        <p className="text-[10px] text-[var(--t-muted)]">📐 {item.print_specs.size}</p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Price strip */}
-                  <div className="mt-3 pt-2.5 border-t border-[var(--t-border)] flex items-baseline justify-between gap-2">
-                    <span className="font-bold text-brand-red text-sm whitespace-nowrap">
-                      {fmtGHS(item.unit_price)}
-                    </span>
-                    <span className="text-[10px] text-[var(--t-muted)] shrink-0">per {item.unit}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-
-      <p className="text-center text-xs text-[var(--t-muted)] px-4 pb-2">
-        Prices are subject to change. Contact us for a formal quotation tailored to your job.
-      </p>
-    </div>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function CustomerPage() {
   const { user, profile } = useAuth();
@@ -1347,6 +1225,7 @@ export function CustomerPage() {
     { key: "jobs",      label: "My Jobs",      Icon: Briefcase  },
     { key: "quoter",    label: "Get a Price",  Icon: Calculator },
     { key: "documents", label: "My Documents", Icon: FileText   },
+    { key: "delivery",  label: "Delivery",     Icon: MapPin     },
     { key: "rates",     label: "Rates",        Icon: Tag        },
   ];
 
@@ -1430,6 +1309,8 @@ export function CustomerPage() {
               )}
             </div>
 
+            <DeliveryLocationPrompt onAdd={() => setSection("delivery")} accent={accentHex} />
+
             {/* Period filter */}
             <div className="mb-4">
               <PeriodPicker period={jobPeriod} onChange={setJobPeriod} accentColor="#C0392B" bgVar="--t-bg" />
@@ -1505,6 +1386,17 @@ export function CustomerPage() {
                 <p className="text-xs text-[var(--t-muted)]">Configure your job above to enable ordering.</p>
               )}
             </div>
+          </>
+        ) : section === "delivery" ? (
+          /* ── Delivery locations ── */
+          <>
+            <div className="mb-5">
+              <h2 className="text-base font-bold text-[var(--t-text1)]">Delivery Location</h2>
+              <p className="text-xs text-[var(--t-muted)] mt-0.5">
+                Where should we deliver your orders? Your pin is shared with our delivery rider.
+              </p>
+            </div>
+            <MyDeliveryLocations accent={accentHex} defaultPhone={profile?.phone || ""} />
           </>
         ) : section === "documents" ? (
           /* ── Documents section ── */

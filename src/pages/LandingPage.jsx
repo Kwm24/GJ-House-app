@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
   Printer, Layers, Tag, Gift, Zap, Shield, DollarSign, MapPin,
@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { getSettings } from "../lib/settings.js";
 import { InstantQuoter, buildInstantQuoteSummary } from "../components/InstantQuoter.jsx";
+import { RatesView } from "../components/RatesView.jsx";
+import { SonarGrid } from "../components/ui/sonar-grid.jsx";
 
 // ── Icon sets ─────────────────────────────────────────────────────────────────
 const SERVICE_ICONS = {
@@ -178,7 +180,7 @@ function SectionWrapper({ sectionKey, styles, className, id, children }) {
 }
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
-function Nav({ appName, logoUrl, navBg, navText, accent, onGetQuote }) {
+function Nav({ appName, logoUrl, navBg, navText, accent, onGetQuote, onRates }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -210,6 +212,9 @@ function Nav({ appName, logoUrl, navBg, navText, accent, onGetQuote }) {
               {label}
             </a>
           ))}
+          <button type="button" onClick={onRates} className="lp-nav-link px-3 py-1.5 rounded-lg text-sm font-medium transition-colors" style={{ color: navText + "99" }}>
+            Rates
+          </button>
         </nav>
 
         <div className="hidden md:flex items-center gap-2">
@@ -238,6 +243,9 @@ function Nav({ appName, logoUrl, navBg, navText, accent, onGetQuote }) {
               {label}
             </a>
           ))}
+          <button type="button" onClick={() => { setMenuOpen(false); onRates(); }} className="block w-full py-2 text-left text-sm font-medium" style={{ color: navText + "99" }}>
+            Rates
+          </button>
           <div className="pt-2 flex flex-col gap-2">
             <Link to="/login"  className="block text-center px-4 py-2.5 rounded-[6px] border border-[#E8E8EC] text-sm font-medium" style={{ color: navText }}>Sign In</Link>
             <button type="button" onClick={() => { setMenuOpen(false); onGetQuote(); }} className="lp-btn block w-full text-center px-4 py-2.5 rounded-[6px] text-sm font-medium text-white">Live Quote</button>
@@ -249,9 +257,31 @@ function Nav({ appName, logoUrl, navBg, navText, accent, onGetQuote }) {
 }
 
 // ── Hero ──────────────────────────────────────────────────────────────────────
+// Process inks for the hero's animated dot grid: cyan, magenta, yellow, key (black)
+const CMYK = ["#00AEEF", "#EC008C", "#FFD200", "#1A1A1A"];
+
 function Hero({ hero, styles, onGetQuote }) {
+  const s = styles?.hero ?? {};
+  if (s.hidden) return null;
+  const bg = s.bg_color || "#FFFFFF";
   return (
-    <SectionWrapper sectionKey="hero" styles={styles}>
+    <section
+      style={{
+        ...(s.text_color     ? { "--lp-text1": s.text_color     } : {}),
+        ...(s.text_secondary ? { "--lp-text2": s.text_secondary } : {}),
+      }}
+    >
+      <SonarGrid
+        colors={CMYK}
+        color="#9CA3AF"
+        baseOpacity={0.35}
+        pingArea={[0.1, 0.15, 0.9, 0.85]}
+        className="w-full"
+        style={{ backgroundColor: bg }}
+      >
+        {/* Soft wash behind the copy keeps it readable while rings pass underneath */}
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10"
+          style={{ background: `radial-gradient(ellipse 42% 46% at 50% 50%, ${bg} 0%, color-mix(in srgb, ${bg} 80%, transparent) 45%, transparent 100%)` }} />
       <div className="pt-20 pb-16 px-6">
         <div className="mx-auto max-w-[1280px] text-center">
           <Reveal delay={0}>
@@ -282,7 +312,8 @@ function Hero({ hero, styles, onGetQuote }) {
           </Reveal>
         </div>
       </div>
-    </SectionWrapper>
+      </SonarGrid>
+    </section>
   );
 }
 
@@ -374,21 +405,34 @@ function WhyUs({ features, styles }) {
               <h2 className="text-3xl sm:text-4xl font-bold tracking-[-0.03em]" style={{ color: "var(--lp-text1)" }}>Built around your business</h2>
             </Reveal>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          {/* Zig-zag rows: image left / point right, then swapped (stacked on phones) */}
+          <div className="space-y-12 sm:space-y-16 lg:space-y-20">
             {features.map((feat, i) => {
               const Icon = WHY_ICONS[i % WHY_ICONS.length];
+              const flip = i % 2 === 1;   // 2nd, 4th… : image on the right
               return (
-                <Reveal key={i} delay={i * 100} direction={i % 2 === 0 ? "right" : "left"}>
-                  <div className="flex gap-4 rounded-xl border border-[#E8E8EC] bg-white p-6 hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-200">
-                    <div className="lp-icon-bg w-10 h-10 rounded-xl flex items-center justify-center shrink-0">
-                      <Icon size={18} style={{ color: "var(--lp-accent)" }} />
+                <div key={i} className="grid grid-cols-1 md:grid-cols-2 items-center gap-6 md:gap-12 lg:gap-16">
+                  <Reveal delay={0} direction={flip ? "left" : "right"} className={flip ? "md:order-2" : ""}>
+                    <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-[#E8E8EC] bg-white shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
+                      {feat.image_url ? (
+                        <img src={feat.image_url} alt={feat.title || ""} loading="lazy" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="lp-icon-bg flex h-full w-full items-center justify-center">
+                          <Icon size={72} strokeWidth={1.25} style={{ color: "var(--lp-accent)" }} aria-hidden="true" />
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <h3 className="font-semibold mb-1" style={{ color: "var(--lp-text1)" }}>{feat.title}</h3>
-                      <p className="text-sm leading-relaxed" style={{ color: "var(--lp-text2)" }}>{feat.description}</p>
+                  </Reveal>
+                  <Reveal delay={120} direction={flip ? "right" : "left"} className={flip ? "md:order-1" : ""}>
+                    <div className="max-w-xl">
+                      <div className="lp-icon-bg w-12 h-12 rounded-xl flex items-center justify-center mb-5">
+                        <Icon size={22} style={{ color: "var(--lp-accent)" }} aria-hidden="true" />
+                      </div>
+                      <h3 className="text-2xl sm:text-3xl font-bold tracking-[-0.02em] mb-3" style={{ color: "var(--lp-text1)" }}>{feat.title}</h3>
+                      <p className="text-base leading-relaxed" style={{ color: "var(--lp-text2)" }}>{feat.description}</p>
                     </div>
-                  </div>
-                </Reveal>
+                  </Reveal>
+                </div>
               );
             })}
           </div>
@@ -443,6 +487,47 @@ function HowItWorks({ steps, styles }) {
         </div>
       </div>
     </SectionWrapper>
+  );
+}
+
+// ── Rates modal (triggered by the "Rates" nav link): same list as the portal ──
+function RatesModal({ open, onClose, onGetQuote }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [open, onClose]);
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto p-4 sm:p-8"
+      role="dialog" aria-modal="true" aria-labelledby="lp-rates-title">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden my-auto" style={{ background: "var(--t-bg)" }}>
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-[var(--t-border)]" style={{ background: "var(--t-surface)" }}>
+          <div>
+            <h2 id="lp-rates-title" className="text-base font-bold text-[var(--t-text1)]">Rates</h2>
+            <p className="text-xs text-[var(--t-text2)]">Our standard pricing for products and services.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg hover:bg-black/5 transition-colors">
+            <X size={18} className="text-[var(--t-text2)]" />
+          </button>
+        </div>
+        <div className="overflow-y-auto max-h-[70vh] px-4 py-5 sm:px-6">
+          <RatesView />
+        </div>
+        <div className="border-t border-[var(--t-border)] px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3" style={{ background: "var(--t-surface)" }}>
+          <p className="text-sm text-[var(--t-text2)]">Need a price for your exact job?</p>
+          <button type="button" onClick={() => { onClose(); onGetQuote(); }}
+            className="lp-btn inline-flex items-center gap-2 px-6 py-2.5 rounded-[6px] text-sm font-semibold text-white transition-all">
+            Get a Live Quote
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -618,6 +703,8 @@ export function LandingPage() {
   const [logoUrl, setLogoUrl]             = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [quoteModalOpen, setQuoteModalOpen] = useState(false);
+  const [ratesModalOpen, setRatesModalOpen] = useState(false);
+  const closeRates = useCallback(() => setRatesModalOpen(false), []);
 
   const g          = content.global_styles ?? {};
   const accent     = g.accent_color   || "#6366F1";
@@ -666,13 +753,14 @@ export function LandingPage() {
 
   return (
     <div className="min-h-screen bg-[#FAFAFA]" style={rootStyle}>
-      <Nav appName={appName} logoUrl={logoUrl} navBg={navBg} navText={navText} accent={accent} onGetQuote={() => setQuoteModalOpen(true)} />
+      <Nav appName={appName} logoUrl={logoUrl} navBg={navBg} navText={navText} accent={accent} onGetQuote={() => setQuoteModalOpen(true)} onRates={() => setRatesModalOpen(true)} />
       <Hero       hero={content.hero}         styles={content.section_styles} onGetQuote={() => setQuoteModalOpen(true)} />
       <StatsBar   stats={content.stats}       styles={content.section_styles} />
       <Services   services={content.services} styles={content.section_styles} />
       <WhyUs      features={content.features} styles={content.section_styles} />
       <HowItWorks steps={content.steps}       styles={content.section_styles} />
       <CTABanner  cta={content.cta}           styles={content.section_styles} />
+      <RatesModal open={ratesModalOpen} onClose={closeRates} onGetQuote={() => setQuoteModalOpen(true)} />
       <QuoteModal open={quoteModalOpen} onClose={() => setQuoteModalOpen(false)} accent={accent} whatsappNumber={whatsappNumber} />
       <Footer     appName={appName} logoUrl={logoUrl} contact={content.contact} styles={content.section_styles} accent={accent} />
       <WhatsAppFloat number={whatsappNumber} />

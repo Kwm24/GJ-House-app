@@ -25,7 +25,7 @@ const FILTERS = [
 function quoteFigures(type, snap) {
   if (type === "digital") {
     const r = snap.result ?? {};
-    return { price: Number(r.sellPrice) || 0, qtyLabel: `${Number(r.qty || 0).toLocaleString()} copies` };
+    return { price: Number(r.sellPrice) || 0, qtyLabel: `${Number(r.qty || 0).toLocaleString()} ${r.isUnit || r.isLF ? "pieces" : "copies"}` };
   }
   const qtys = (snap.resultQtys?.length ? snap.resultQtys : Object.keys(snap.results ?? {}))
     .map(Number).filter((n) => n > 0);

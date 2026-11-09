@@ -65,7 +65,7 @@ export function DigitalQuoteResults({ calc, qty, duplex, rates, pickedSheet, onP
   const cells = autosum ? cellMap : null;
 
   const {
-    isLF, isBook, normPages, leavesPerCopy, comparison, bestSheet, pickedResult,
+    isUnit, unitQuote, isLF, isBook, normPages, leavesPerCopy, comparison, bestSheet, pickedResult,
     coverComparison, bestCover, activeMat, lfQuote, sellPrice,
   } = calc;
 
@@ -88,7 +88,7 @@ export function DigitalQuoteResults({ calc, qty, duplex, rates, pickedSheet, onP
   const body = (
     <>
       {/* ── Sheet comparison ── */}
-      {!isLF && (
+      {!isLF && !isUnit && (
         <div className={cls.card}>
           <h3 className="text-sm font-semibold text-[var(--t-text1)] mb-3">Parent sheet comparison</h3>
           <div className="overflow-x-auto">
@@ -168,7 +168,29 @@ export function DigitalQuoteResults({ calc, qty, duplex, rates, pickedSheet, onP
       <div className={cls.card}>
         <h3 className="text-sm font-semibold text-[var(--t-text1)] mb-3">Quote</h3>
 
-        {isLF && lfQuote ? (
+        {isUnit ? (unitQuote ? (
+          <>
+            <div className="text-center py-2">
+              <p className="text-[10px] text-[var(--t-muted)] mb-1">Total price</p>
+              <p className="text-3xl font-bold text-[var(--t-text1)] tabular-nums"><span {...totalProps}>{GHS(unitQuote.sell)}</span></p>
+              <p className="text-xs text-[var(--t-muted)] mt-1">
+                {qty} {qty === 1 ? 'piece' : 'pieces'} · {GHS(unitQuote.sell / qty)} per piece · {unitQuote.item}
+              </p>
+            </div>
+            <div className="mt-3 border-t border-[var(--t-border)] pt-3 space-y-1">
+              {unitQuote.rows.map((r) => (
+                <div key={r.label} className="flex justify-between gap-3 text-xs text-[var(--t-text2)]">
+                  <span>{r.label}</span><span className="tabular-nums">{GHS(r.amount)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between gap-3 text-xs text-[var(--t-text2)]">
+                <span>Markup ({unitQuote.markup}%)</span><span className="tabular-nums">{GHS(unitQuote.sell - unitQuote.cost)}</span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-[var(--t-muted)]">Pick an item with a cost above GH₵ 0 to see the price.</p>
+        )) : isLF && lfQuote ? (
           <>
             <div className="text-center py-2">
               <p className="text-[10px] text-[var(--t-muted)] mb-1">Total price</p>
@@ -198,7 +220,7 @@ export function DigitalQuoteResults({ calc, qty, duplex, rates, pickedSheet, onP
       </div>
 
       {/* ── Layout preview ── */}
-      {!isLF && pickedResult?.f && (
+      {!isLF && !isUnit && pickedResult?.f && (
         <div className={cls.card}>
           <h3 className="text-sm font-semibold text-[var(--t-text1)] mb-3">Layout preview</h3>
           <div className="flex flex-wrap gap-6">

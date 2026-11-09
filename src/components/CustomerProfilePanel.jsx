@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { X, User, Briefcase, FileText, Edit2, Check, XCircle, KeyRound, Mail, ExternalLink } from "lucide-react";
+import { X, User, Briefcase, FileText, Edit2, Check, XCircle, KeyRound, ExternalLink, MapPin } from "lucide-react";
+import { CustomerDeliveryLocations } from "./delivery/DeliveryLocations.jsx";
 import { updateCustomerProfile, updateCustomerEmail, sendPasswordReset } from "../lib/auth.js";
 import { listJobsByCustomer, jobGrandTotal } from "../lib/jobs.js";
 import { listInvoicesByCustomer, STATUS_COLORS, TYPE_COLORS } from "../lib/invoices.js";
@@ -16,6 +17,7 @@ const TABS = [
   { id: "overview",  label: "Overview",   Icon: User       },
   { id: "jobs",      label: "Jobs",       Icon: Briefcase  },
   { id: "documents", label: "Documents",  Icon: FileText   },
+  { id: "delivery",  label: "Delivery",   Icon: MapPin     },
 ];
 
 const JOB_STATUS_LABELS = {
@@ -259,6 +261,12 @@ export function CustomerProfilePanel({
             <div className="flex justify-center py-8">
               <div className="h-6 w-6 rounded-full border-2 border-[#6366F1]/30 border-t-[#6366F1] animate-spin" />
             </div>
+          )}
+
+          {/* ── DELIVERY ── */}
+          {tab === "delivery" && (
+            <CustomerDeliveryLocations customerId={localProfile.user_id}
+              customerName={localProfile.full_name || ""} customerPhone={localProfile.phone || ""} />
           )}
 
           {/* ── OVERVIEW ── */}

@@ -22,6 +22,9 @@ const DIGITAL_JOB_LABELS = {
   book:     'Booklet / Book',
   banner:   'Banner',
   sticker:  'Sticker / Label',
+  rollup:   'Roll-up banner',
+  tshirt:   'T-shirt printing',
+  souvenir: 'Souvenir branding',
   custom:   'Custom Digital Print',
 };
 
@@ -36,7 +39,9 @@ function DigitalPrintItemCard({ job, variant }) {
   // Use stored description first; build fallback from raw fields
   const description = result.description || (() => {
     const parts = [];
-    if (result.isLF) {
+    if (result.isUnit) {
+      if (qJob.unitItem) parts.push(qJob.unitItem);
+    } else if (result.isLF) {
       if (qJob.lfMat) parts.push(qJob.lfMat);
     } else {
       if (qJob.stock)    parts.push(qJob.stock);
@@ -47,7 +52,7 @@ function DigitalPrintItemCard({ job, variant }) {
     return parts.join(' · ') || '—';
   })();
 
-  const sizeLabel = (result.isLF || qJob.sizeKey) ? digitalJobSizeLabel(qJob) : '—';
+  const sizeLabel = (result.isLF || result.isUnit || qJob.sizeKey) ? digitalJobSizeLabel(qJob) : '—';
 
   // Designer view: 4 tiles (finished size, pages, colours, binding)
   if (variant === "designer") {

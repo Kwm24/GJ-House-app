@@ -19,6 +19,7 @@ export const DIGITAL_SIZES = {
 // Size of a saved digital job for spec sheets / invoice lines, in the unit the
 // quote was made in: "A5 (148mm × 210mm)", "Custom (10cm × 15cm)", "6ft × 3ft".
 export function digitalJobSizeLabel(j = {}) {
+  if (isUnitJob(j.jobType)) return j.unitItem || '—';
   if (j.jobType === 'banner' || j.jobType === 'sticker') return `${j.lfWidth}${j.lfUnit} × ${j.lfHeight}${j.lfUnit}`;
   const unit = j.dimUnit || 'mm';
   if (j.sizeKey === 'Custom') return `Custom (${fmtDims(j.customW, j.customH, 'mm', unit)})`;
@@ -68,6 +69,37 @@ export const DEFAULT_DIGITAL_RATES = {
       'Reflective vinyl': 25,
     },
   },
+  // Products priced per piece (cost to us per piece, before markup). Lists,
+  // so the admin can add / rename / remove items. See UNIT_JOB_TYPES.
+  unit: {
+    // One size (80 × 200 cm, with stand); the customer picks the material
+    rollup: [
+      { name: 'Roll-up banner 80 × 200 cm, Flexy', cost: 350 },
+      { name: 'Roll-up banner 80 × 200 cm, PVC',   cost: 450 },
+    ],
+    tshirt: [
+      { name: 'Round-neck T-shirt, front print',          cost: 45 },
+      { name: 'Round-neck T-shirt, front & back print',   cost: 60 },
+      { name: 'Polo shirt, front print',                  cost: 65 },
+      { name: 'Print only (customer brings the shirt)',   cost: 20 },
+    ],
+    souvenir: [
+      { name: 'Ceramic mug',                  cost: 25 },
+      { name: 'Magic (colour-changing) mug',  cost: 40 },
+      { name: 'Plastic cup',                  cost: 8 },
+      { name: 'Paper cup',                    cost: 3 },
+      { name: 'Pen',                          cost: 3 },
+      { name: 'Key holder',                   cost: 10 },
+      { name: 'Notebook / jotter',            cost: 25 },
+      { name: 'Tote bag',                     cost: 20 },
+      { name: 'Cap',                          cost: 35 },
+      { name: 'Water bottle',                 cost: 30 },
+      { name: 'Wristband',                    cost: 5 },
+      { name: 'Lanyard',                      cost: 8 },
+      { name: 'Umbrella',                     cost: 60 },
+      { name: 'Flash drive',                  cost: 50 },
+    ],
+  },
   // Lamination cost per parent sheet, per laminated side (GH₵)
   lamination: {
     'Gloss':               { 'A3 Extra': 2.50, 'A3': 2.20, 'A4': 1.20 },
@@ -93,7 +125,48 @@ export const DEFAULT_DIGITAL_RATES = {
   lfMin:      10,   // minimum charge per banner/sticker GHS
   lfMarkup:   40,   // large-format markup % (on top of material cost)
   areaUnit:   'sqft', // 'sqft' | 'sqm'
+  unitMarkup: 40,   // markup % on per-piece products (roll-ups, T-shirts, souvenirs)
 };
+
+// ── Per-piece products ─────────────────────────────────────────────────────────
+// Priced as unit cost × quantity (no sheets / area). Keys are stored in saved
+// quotes, so they never change.
+export const UNIT_JOB_TYPES = ['rollup', 'tshirt', 'souvenir'];
+export const UNIT_JOB_LABELS = {
+  rollup:   'Roll-up banner',
+  tshirt:   'T-shirt printing',
+  souvenir: 'Souvenir branding',
+};
+export const isUnitJob = (jobType) => UNIT_JOB_TYPES.includes(jobType);
+
+// Key of a per-piece item's Live Quote image in settings.instant_quoter_thumbnails
+// ("souvenir:Ceramic mug"). Job types use their plain key ("flyer").
+export const unitThumbKey = (jobType, itemName) => `${jobType}:${itemName}`;
+
+// The item list for a per-piece job type ([{ name, cost }]).
+export function unitItems(rates, jobType) {
+  const list = rates?.unit?.[jobType];
+  return Array.isArray(list) ? list.filter((i) => i && i.name) : [];
+}
+
+// Saved settings over the defaults. Item lists (arrays) are replaced, not
+// merged, so items the admin removed stay removed.
+export function mergeDigitalRates(saved, base = DEFAULT_DIGITAL_RATES) {
+  return deepMerge(base, saved || {});
+}
+
+function deepMerge(target, source) {
+  const out = { ...target };
+  for (const k of Object.keys(source)) {
+    const v = source[k];
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      out[k] = deepMerge(target?.[k] || {}, v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
 
 // Lamination options shown in the quoters ('None' is not stored in rates)
 export const LAMINATION_NONE = 'None';

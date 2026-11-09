@@ -11,6 +11,7 @@ import {
   DEFAULT_DIGITAL_RATES, DIGITAL_STOCK_NAMES, DIGITAL_SHEET_NAMES,
   LAMINATION_NONE, laminationOptions, laminationCost,
   DIGITAL_SIZES, digitalSizeLabel,
+  isUnitJob, unitItems, unitThumbKey, mergeDigitalRates,
 } from "../lib/digitalPrintSpecs.js";
 import { UNIT_TO_M, UNIT_KEYS, convertLength, fmtDims } from "../lib/units.js";
 import { DimensionInput, UnitSelect } from "./DimensionInput.jsx";
@@ -27,17 +28,22 @@ const JOB_PRESETS = {
   book:    { size: 'A5 (148×210)',          duplex: true,  qty: 100  },
   banner:  { size: 'Custom',                duplex: false, qty: 1    },
   sticker: { size: 'Custom',                duplex: false, qty: 100  },
+  rollup:  { size: 'Custom',                duplex: false, qty: 1    },
+  tshirt:  { size: 'Custom',                duplex: false, qty: 20   },
+  souvenir:{ size: 'Custom',                duplex: false, qty: 50   },
   custom:  { size: 'A4 (210×297)',          duplex: false, qty: 500  },
 };
 
 const JOB_TYPES = [
   { value: 'flyer',    label: 'Flyer / Leaflet / Poster' },
   { value: 'card',     label: 'Business Card' },
-  { value: 'brochure', label: 'Brochure (bi-fold)' },
   { value: 'trifold',  label: 'Trifold Brochure' },
   { value: 'book',     label: 'Booklet / Book with cover' },
   { value: 'banner',   label: 'Banner' },
+  { value: 'rollup',   label: 'Roll-up Banner' },
   { value: 'sticker',  label: 'Sticker / Label' },
+  { value: 'tshirt',   label: 'T-shirt Printing' },
+  { value: 'souvenir', label: 'Souvenirs: mugs, cups, pens & more' },
   { value: 'custom',   label: 'Other / Custom size' },
 ];
 
@@ -76,8 +82,22 @@ function cheapestSheet(w, h, pieces, duplex, stock, rates) {
 }
 
 // ── Build a WhatsApp-ready order summary from a result snapshot ───────────────
-export function buildInstantQuoteSummary({ jobType, jobLabel, size, qty, paper, duplex, pages, bindType, coverStock, covDuplex, lamination, area, areaUnit, mat, total, perUnit }) {
+export function buildInstantQuoteSummary({ jobType, jobLabel, size, qty, paper, duplex, pages, bindType, coverStock, covDuplex, lamination, area, areaUnit, mat, unitItem, total, perUnit }) {
   const GHSfmt = (n) => "GH₵ " + Number(n).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (unitItem) {
+    return [
+      "Hi, I'd like to place an order:",
+      "",
+      `Product: ${jobLabel}`,
+      `Item: ${unitItem}`,
+      `Quantity: ${qty.toLocaleString()} piece(s)`,
+      "",
+      `Estimated total: ${GHSfmt(total)}`,
+      `Per piece: ${GHSfmt(perUnit)}`,
+      "",
+      "I'll send my logo / design. Please confirm and help me finalise my order. Thank you!",
+    ].join("\n");
+  }
   const isLarge = !!area;
   const lines = [
     "Hi, I'd like to place an order for a digital print job:",
@@ -161,6 +181,9 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
   const [lfUnit,   setLfUnit]   = useState('ft');
   const [lfMat,    setLfMat]    = useState('');
 
+  // Per-piece products (roll-up banners, T-shirts, souvenirs)
+  const [unitItem, setUnitItem] = useState('');
+
   // Changing the banner/sticker unit converts the typed size (20cm → 0.2m)
   function changeLfUnit(next) {
     setLfWidth((w) => convertLength(w, lfUnit, next));
@@ -171,7 +194,7 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
   useEffect(() => {
     getSettings()
       .then((s) => {
-        if (s?.digital_quote_rates)       setRates((r) => deepMerge(r, s.digital_quote_rates));
+        if (s?.digital_quote_rates)       setRates((r) => mergeDigitalRates(s.digital_quote_rates, r));
         if (s?.instant_quoter_thumbnails) setQuoterThumbnails(s.instant_quoter_thumbnails);
       })
       .catch(() => {});
@@ -183,10 +206,12 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
     setSizeKey(pre.size);
     setDuplex(pre.duplex);
     setQty(pre.qty);
+    setUnitItem('');
     if (type === 'banner') { setLfWidth(6); setLfUnit('ft'); }
     if (type === 'sticker') { setLfWidth(10); setLfHeight(10); setLfUnit('cm'); }
   }
 
+  const isUnit = isUnitJob(jobType);
   const isLF   = jobType === 'banner' || jobType === 'sticker';
   const isBook = jobType === 'book';
   const isFold = jobType === 'brochure' || jobType === 'trifold';
@@ -207,7 +232,17 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
   const lfMaterials = Object.keys(rates.lf[jobType] || {});
   const activeMat   = lfMat || lfMaterials[0] || '';
 
+  const itemList   = isUnit ? unitItems(rates, jobType) : [];
+  const activeItem = itemList.find((i) => i.name === unitItem) || itemList[0] || null;
+  const unitMarkup = rates.unitMarkup ?? rates.markup ?? 0;
+  const unitSell   = (item) => (Number(item?.cost) || 0) * (1 + unitMarkup / 100);
+
   const result = useMemo(() => {
+    if (isUnit) {
+      const sell = unitSell(activeItem) * qty;
+      if (!sell) return null;
+      return { total: sell, perUnit: qty > 0 ? sell / qty : sell, qty, item: activeItem.name };
+    }
     if (isLF) {
       const matRates = rates.lf[jobType] || {};
       const rate     = matRates[activeMat] || 0;
@@ -260,12 +295,17 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
       qty,
       sheet:   best.name,
     };
-  }, [isLF, jobType, dims, qty, leavesPerCopy, duplex, stock, isBook, isFold, bindType, spine, coverStock, covDuplex, lamination, activeMat, lfWidth, lfHeight, lfUnit, rates]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUnit, activeItem, unitMarkup, isLF, jobType, dims, qty, leavesPerCopy, duplex, stock, isBook, isFold, bindType, spine, coverStock, covDuplex, lamination, activeMat, lfWidth, lfHeight, lfUnit, rates]);
 
   // Notify parent whenever the result or key config changes
   useEffect(() => {
     if (!onResult) return;
     if (!result) { onResult(null); return; }
+    if (isUnit) {
+      onResult({ jobType, jobLabel, unitItem: result.item, qty, size: result.item, total: result.total, perUnit: result.perUnit });
+      return;
+    }
     const size = isLF
       ? `${lfWidth}${lfUnit} × ${lfHeight}${lfUnit}`
       : sizeKey === "Custom" ? `Custom (${fmtDims(customW, customH, "mm", dimUnit)})` : digitalSizeLabel(sizeKey, dimUnit);
@@ -308,7 +348,10 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
 
   // One-line answers shown on each step's header
   const jobLabel = JOB_TYPES.find((t) => t.value === jobType)?.label || jobType;
-  const sizeSummary = isLF
+  const pieces = (n) => `${n.toLocaleString()} piece${n !== 1 ? 's' : ''}`;
+  const sizeSummary = isUnit
+    ? [activeItem?.name, pieces(qty)].filter(Boolean).join(' · ')
+    : isLF
     ? `${lfWidth}${lfUnit} × ${lfHeight}${lfUnit} · ${qty.toLocaleString()} piece${qty !== 1 ? 's' : ''}`
     : [
         sizeKey === 'Custom' ? `Custom ${fmtDims(customW, customH, 'mm', dimUnit)}` : digitalSizeLabel(sizeKey, dimUnit),
@@ -383,7 +426,8 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
                     ) : (
                       <span className="text-6xl">{
                         { flyer: '🗞️', card: '💳', brochure: '📖', trifold: '📋',
-                          book: '📚', banner: '🖼️', sticker: '🏷️', custom: '✏️' }[t.value] || '🖨️'
+                          book: '📚', banner: '🖼️', sticker: '🏷️', custom: '✏️',
+                          rollup: '🪧', tshirt: '👕', souvenir: '☕' }[t.value] || '🖨️'
                       }</span>
                     )}
                   </div>
@@ -395,9 +439,55 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
         </QuoteStep>
 
         {/* 2 · Size and quantity */}
-        <QuoteStep step={2} title="What is the size and quantity?" summary={sizeSummary}
-          open={openSteps.has(2)} onToggle={() => toggleStep(2)} onNext={() => nextStep(2)} accent={accent}>
-          {!isLF ? (
+        <QuoteStep step={2}
+          title={isUnit ? (jobType === 'rollup' ? 'Which material and how many?' : 'Which item and how many?') : 'What is the size and quantity?'}
+          summary={sizeSummary}
+          open={openSteps.has(2)} onToggle={() => toggleStep(2)} onNext={isUnit ? undefined : () => nextStep(2)} accent={accent}>
+          {isUnit ? (
+            <div className="space-y-4">
+              {itemList.length ? (
+                <div>
+                  <p className={lbl}>{jobType === 'rollup' ? 'Material (all roll-ups are 80 × 200 cm with stand)' : jobType === 'tshirt' ? 'Shirt & print' : 'Item'}</p>
+                  {/* Same scrolling picture cards as "What do you need printed?" */}
+                  <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-none">
+                    {itemList.map((item) => {
+                      const on    = activeItem?.name === item.name;
+                      const thumb = quoterThumbnails[unitThumbKey(jobType, item.name)];
+                      return (
+                        <button key={item.name} type="button" aria-pressed={on} onClick={() => setUnitItem(item.name)}
+                          className={[
+                            "flex-shrink-0 flex flex-col items-center gap-2 rounded-xl border-2 p-2 w-[170px] transition-all",
+                            on ? "border-transparent text-white" : "border-[var(--t-border)] text-[var(--t-text2)] bg-[var(--t-surface)] hover:border-brand-red/40",
+                          ].join(" ")}
+                          style={on ? { background: accent, borderColor: accent } : {}}>
+                          <div className={[
+                            "w-[150px] h-[150px] rounded-lg overflow-hidden flex items-center justify-center shrink-0",
+                            on ? "bg-white/20" : "bg-[var(--t-bg)]",
+                          ].join(" ")}>
+                            {thumb ? (
+                              <img src={thumb} alt="" loading="lazy" className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-6xl" aria-hidden="true">{{ rollup: '🪧', tshirt: '👕', souvenir: '🎁' }[jobType] || '🖨️'}</span>
+                            )}
+                          </div>
+                          <span className="text-xs font-semibold text-center leading-tight line-clamp-2 min-h-[2.5em]">{item.name}</span>
+                          <span className={`text-xs font-bold tabular-nums ${on ? "" : "text-[var(--t-text1)]"}`}>{GHS(unitSell(item))}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-[var(--t-muted)]">Price per piece, branding with your logo or design included.</p>
+                </div>
+              ) : (
+                <p className="text-sm text-[var(--t-muted)]">Contact us for a price on this product.</p>
+              )}
+              <div className="sm:max-w-[200px]">
+                <label className={lbl}>Quantity (pieces)</label>
+                <input type="number" min="1" className={inp} value={qty}
+                  onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} />
+              </div>
+            </div>
+          ) : !isLF ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={lbl}>{isBook ? 'Page size' : isFold ? 'Flat (open) size' : 'Finished size'}</label>
@@ -493,8 +583,8 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
           )}
         </QuoteStep>
 
-        {/* 3 · Material */}
-        <QuoteStep step={3} title="What material should be used for your job?" summary={materialSummary}
+        {/* 3 · Material (not asked for per-piece products) */}
+        {!isUnit && <QuoteStep step={3} title="What material should be used for your job?" summary={materialSummary}
           open={openSteps.has(3)} onToggle={() => toggleStep(3)} onNext={() => nextStep(3)} accent={accent}>
           <GrammageNote isLF={isLF} />
           {!isLF ? (
@@ -525,10 +615,10 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
               <FeelHint name={activeMat} />
             </div>
           )}
-        </QuoteStep>
+        </QuoteStep>}
 
-        {/* 4 · Finishing */}
-        <QuoteStep step={4} title="What finishing do you want?" summary={finishingSummary}
+        {/* 4 · Finishing (not asked for per-piece products) */}
+        {!isUnit && <QuoteStep step={4} title="What finishing do you want?" summary={finishingSummary}
           open={openSteps.has(4)} onToggle={() => toggleStep(4)} accent={accent}>
           {!isLF ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -578,7 +668,7 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
                 : 'Cutting to size is included with every sticker.'}
             </p>
           )}
-        </QuoteStep>
+        </QuoteStep>}
       </div>
 
       {/* ── Price result ── */}
@@ -590,16 +680,19 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
             </p>
             <div className="flex items-end justify-between gap-4 flex-wrap">
               <div>
-                <p className="text-xs opacity-75 mb-0.5">Total for {qty.toLocaleString()} {isLF ? 'piece' + (qty !== 1 ? 's' : '') : 'copies'}</p>
+                <p className="text-xs opacity-75 mb-0.5">Total for {(isLF || isUnit) ? pieces(qty) : `${qty.toLocaleString()} copies`}</p>
                 <p className="text-4xl font-black tracking-tight">{GHS(result.total)}</p>
               </div>
               <div className="text-right">
-                <p className="text-xs opacity-75 mb-0.5">Per {isLF ? 'piece' : 'copy'}</p>
+                <p className="text-xs opacity-75 mb-0.5">Per {(isLF || isUnit) ? 'piece' : 'copy'}</p>
                 <p className="text-2xl font-bold">{GHS(result.perUnit)}</p>
               </div>
             </div>
             {result.sheet && (
               <p className="text-xs opacity-70 mt-3">Printed on {result.sheet} parent sheet</p>
+            )}
+            {result.item && (
+              <p className="text-xs opacity-70 mt-3">{result.item}</p>
             )}
             {result.area && (
               <p className="text-xs opacity-70 mt-3">{result.area} {result.areaUnit} · {result.mat}</p>
@@ -615,7 +708,9 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
       ) : (
         <div className="rounded-2xl border border-[var(--t-border)] bg-[var(--t-surface)] p-6 text-center">
           <p className="text-sm text-[var(--t-muted)]">
-            {!isLF && (!dims[0] || !dims[1])
+            {isUnit
+              ? "Pick an item to see the price."
+              : !isLF && (!dims[0] || !dims[1])
               ? "Enter a valid size to see the price."
               : "This size doesn't fit on any standard sheet — try a smaller size or contact us."}
           </p>
@@ -707,14 +802,4 @@ function ChoiceRow({ value, onChange, options, accent }) {
       ))}
     </div>
   );
-}
-
-function deepMerge(target, source) {
-  const out = { ...target };
-  for (const k of Object.keys(source)) {
-    if (source[k] !== null && typeof source[k] === 'object' && !Array.isArray(source[k])) {
-      out[k] = deepMerge(target[k] || {}, source[k]);
-    } else { out[k] = source[k]; }
-  }
-  return out;
 }

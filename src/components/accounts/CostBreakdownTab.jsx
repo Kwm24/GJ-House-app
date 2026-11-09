@@ -91,7 +91,7 @@ function DigitalSection({ q }) {
   const rates = useMemo(() => digitalSnapshotRates(snap), [snap]);
   const calc  = useMemo(() => computeDigitalQuote(job, rates, snap.result?.sheetName || null), [job, rates, snap]);
 
-  const shown = calc.isLF ? calc.lfQuote?.sell : calc.sellPrice;
+  const shown = calc.isUnit ? calc.unitQuote?.sell : calc.isLF ? calc.lfQuote?.sell : calc.sellPrice;
   const saved = snap.result?.sellPrice;
   const drift = saved != null && shown != null && Math.abs(shown - saved) >= 0.01;
 

@@ -4,6 +4,7 @@ import { DEFAULT_RATES, RATE_GROUPS } from "../../lib/printSpecs.js";
 import { LoginBackgroundSettings } from "./LoginBackgroundSettings.jsx";
 import { DigitalRatesEditor } from "../DigitalRatesEditor.jsx";
 import { applyAccentHex } from "../AccentColorInjector.jsx";
+import { UNIT_JOB_TYPES, UNIT_JOB_LABELS, unitItems, unitThumbKey, mergeDigitalRates } from "../../lib/digitalPrintSpecs.js";
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-red/40 focus:border-brand-red";
@@ -46,6 +47,8 @@ export function SettingsTab() {
   const [quoterThumbnails, setQuoterThumbnails] = useState({});
   const [uploadingThumb, setUploadingThumb] = useState({});
   const [thumbMsg, setThumbMsg] = useState({});
+  // Item lists for the per-piece products (refreshed when the rates editor saves)
+  const [digitalRates, setDigitalRates] = useState(() => mergeDigitalRates(null));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,6 +71,7 @@ export function SettingsTab() {
         setRates({ ...DEFAULT_RATES, ...(data.quote_rates || {}) });
         setAccentColor(data.accent_color || "#C0392B");
         setQuoterThumbnails(data.instant_quoter_thumbnails || {});
+        setDigitalRates(mergeDigitalRates(data.digital_quote_rates));
       }
     } catch (err) {
       setError(err.message ?? "Could not load settings.");
@@ -192,6 +196,50 @@ export function SettingsTab() {
     } catch (err) {
       setThumbMsg((s) => ({ ...s, [jobType]: err.message ?? "Could not remove" }));
     }
+  }
+
+  // One upload tile (image preview, remove, upload button) for a thumbnail key
+  function renderThumbTile(value, label) {
+    return (
+            <div key={value} className="flex flex-col gap-1.5">
+              <p className="text-xs font-semibold text-gray-700">{label}</p>
+              <div className="relative w-full aspect-square rounded-xl overflow-hidden border border-gray-200 bg-gray-100 flex items-center justify-center">
+                {quoterThumbnails[value] ? (
+                  <>
+                    <img src={quoterThumbnails[value]} alt={label} className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveQuoterThumb(value)}
+                      className="absolute top-1 right-1 rounded-full bg-black/50 text-white text-xs w-5 h-5 flex items-center justify-center hover:bg-red-600 transition-colors"
+                      title="Remove"
+                    >×</button>
+                  </>
+                ) : (
+                  <span className="text-2xl opacity-30">🖼️</span>
+                )}
+              </div>
+              <label className="relative cursor-pointer">
+                <span className={[
+                  "block text-center rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-medium transition-colors",
+                  uploadingThumb[value] ? "opacity-60 bg-gray-100" : "bg-white hover:bg-gray-50",
+                ].join(" ")}>
+                  {uploadingThumb[value] ? "Uploading…" : "Upload image"}
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={!!uploadingThumb[value]}
+                  className="sr-only"
+                  onChange={(e) => { if (e.target.files?.[0]) handleQuoterThumbUpload(value, e.target.files[0]); e.target.value = ""; }}
+                />
+              </label>
+              {thumbMsg[value] && (
+                <p className={`text-[10px] text-center ${thumbMsg[value].startsWith("✓") ? "text-green-700" : "text-red-600"}`}>
+                  {thumbMsg[value]}
+                </p>
+              )}
+            </div>
+    );
   }
 
   async function handleSaveRates() {
@@ -550,7 +598,7 @@ export function SettingsTab() {
       <LoginBackgroundSettings />
 
       {/* ── Digital print rates (shared editor — also used by the Production rates account) ── */}
-      <DigitalRatesEditor />
+      <DigitalRatesEditor onSaved={setDigitalRates} />
 
       {/* ── Live Quote thumbnails ── */}
       <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
@@ -562,52 +610,41 @@ export function SettingsTab() {
           {[
             { value: 'flyer',    label: 'Flyer / Poster'    },
             { value: 'card',     label: 'Business Card'      },
-            { value: 'brochure', label: 'Brochure (bi-fold)' },
             { value: 'trifold',  label: 'Trifold Brochure'   },
             { value: 'book',     label: 'Booklet / Book'     },
             { value: 'banner',   label: 'Banner'             },
             { value: 'sticker',  label: 'Sticker / Label'    },
+            { value: 'rollup',   label: 'Roll-up Banner'     },
+            { value: 'tshirt',   label: 'T-shirt Printing'   },
+            { value: 'souvenir', label: 'Souvenir Branding'  },
             { value: 'custom',   label: 'Custom / Other'     },
-          ].map(({ value, label }) => (
-            <div key={value} className="flex flex-col gap-1.5">
-              <p className="text-xs font-semibold text-gray-700">{label}</p>
-              <div className="relative w-full aspect-square rounded-xl overflow-hidden border border-gray-200 bg-gray-100 flex items-center justify-center">
-                {quoterThumbnails[value] ? (
-                  <>
-                    <img src={quoterThumbnails[value]} alt={label} className="w-full h-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveQuoterThumb(value)}
-                      className="absolute top-1 right-1 rounded-full bg-black/50 text-white text-xs w-5 h-5 flex items-center justify-center hover:bg-red-600 transition-colors"
-                      title="Remove"
-                    >×</button>
-                  </>
+          ].map(({ value, label }) => renderThumbTile(value, label))}
+        </div>
+      </div>
+
+      {/* ── Live Quote: per-piece product item images ── */}
+      <div className="rounded-xl bg-brand-cream p-5 sm:p-8">
+        <h2 className="text-lg sm:text-xl font-semibold text-brand-dark">Live Quote: Product Item Images</h2>
+        <p className="mt-1 text-sm text-gray-600 mb-5">
+          One image per item for roll-up banners, T-shirts and souvenirs, shown under &ldquo;Which item and how many?&rdquo;.
+          Add or rename items in Digital print rates above. A renamed item needs its image uploaded again.
+        </p>
+        <div className="space-y-6">
+          {UNIT_JOB_TYPES.map((type) => {
+            const items = unitItems(digitalRates, type);
+            return (
+              <div key={type}>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-red border-b border-gray-300 pb-1.5 mb-3">{UNIT_JOB_LABELS[type]}</h3>
+                {items.length ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
+                    {items.map((item) => renderThumbTile(unitThumbKey(type, item.name), item.name))}
+                  </div>
                 ) : (
-                  <span className="text-2xl opacity-30">🖼️</span>
+                  <p className="text-xs text-gray-500">No items yet. Add them in Digital print rates → Priced per piece.</p>
                 )}
               </div>
-              <label className="relative cursor-pointer">
-                <span className={[
-                  "block text-center rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-medium transition-colors",
-                  uploadingThumb[value] ? "opacity-60 bg-gray-100" : "bg-white hover:bg-gray-50",
-                ].join(" ")}>
-                  {uploadingThumb[value] ? "Uploading…" : "Upload image"}
-                </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  disabled={!!uploadingThumb[value]}
-                  className="sr-only"
-                  onChange={(e) => { if (e.target.files?.[0]) handleQuoterThumbUpload(value, e.target.files[0]); e.target.value = ""; }}
-                />
-              </label>
-              {thumbMsg[value] && (
-                <p className={`text-[10px] text-center ${thumbMsg[value].startsWith("✓") ? "text-green-700" : "text-red-600"}`}>
-                  {thumbMsg[value]}
-                </p>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

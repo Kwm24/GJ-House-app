@@ -4,7 +4,7 @@
  * Accounts cost breakdown (which re-runs it on a saved quote's job + rates so
  * it shows exactly what the quoter showed).
  */
-import { DIGITAL_SHEET_NAMES, DIGITAL_SIZES, LAMINATION_NONE, laminationCost } from "./digitalPrintSpecs.js";
+import { DIGITAL_SHEET_NAMES, DIGITAL_SIZES, LAMINATION_NONE, laminationCost, isUnitJob, unitItems } from "./digitalPrintSpecs.js";
 import { UNIT_TO_M } from "./units.js";
 import { formatGHS as GHS } from "./currency.js";
 
@@ -51,8 +51,10 @@ export function computeDigitalQuote(job, rates, pickedSheet = null) {
     jobType, sizeKey, customW, customH, qty, stock, duplex, extra = 0,
     pages, bindType, spine, coverStock, covDuplex,
     lamination = LAMINATION_NONE, lfWidth, lfHeight, lfUnit, lfMat,
+    unitItem, unitCost: savedUnitCost,
   } = job;
 
+  const isUnit = isUnitJob(jobType);
   const isLF   = jobType === 'banner' || jobType === 'sticker';
   const isBook = jobType === 'book';
   const isFold = jobType === 'brochure' || jobType === 'trifold';
@@ -63,7 +65,7 @@ export function computeDigitalQuote(job, rates, pickedSheet = null) {
   if (isBook) normPages = bindType === 'Saddle stitch' ? Math.ceil(pages / 4) * 4 : Math.ceil(pages / 2) * 2;
   const leavesPerCopy = duplex ? Math.ceil(normPages / 2) : normPages;
 
-  const comparison   = isLF ? {} : calcComparison(dims[0], dims[1], qty * leavesPerCopy, duplex, stock, rates);
+  const comparison   = (isLF || isUnit) ? {} : calcComparison(dims[0], dims[1], qty * leavesPerCopy, duplex, stock, rates);
   const bestSheet    = cheapest(comparison);
   const pickedRaw    = pickedSheet ? comparison[pickedSheet] : null;
   const pickedResult = pickedRaw && pickedRaw.up > 0 ? pickedRaw : bestSheet;
@@ -94,8 +96,25 @@ export function computeDigitalQuote(job, rates, pickedSheet = null) {
     lfQuote = { rows, cost, sell, area: area.toFixed(2), unit: sq ? 'sq ft' : 'm²', rate };
   }
 
+  // Per-piece products (roll-ups, T-shirts, souvenirs): unit cost × quantity.
+  // If the item has since been renamed/removed, use the cost saved with the job.
+  const items      = isUnit ? unitItems(rates, jobType) : [];
+  const activeItem = isUnit ? (items.find((i) => i.name === unitItem) || (unitItem ? null : items[0]) || null) : null;
+  let unitQuote = null;
+  if (isUnit) {
+    const name = activeItem?.name || unitItem || '';
+    const unitC = Number(activeItem ? activeItem.cost : savedUnitCost) || 0;
+    if (name && unitC > 0) {
+      const rows = [{ label: `${name} (${qty} × ${GHS(unitC)})`, amount: unitC * qty }];
+      if (extra) rows.push({ label: `Extras (${qty} × ${GHS(extra)})`, amount: qty * extra });
+      const cost   = rows.reduce((s, r) => s + r.amount, 0);
+      const markup = rates.unitMarkup ?? rates.markup ?? 0;
+      unitQuote = { rows, cost, sell: cost * (1 + markup / 100), markup, item: name, unitCost: unitC };
+    }
+  }
+
   const quoteRows = [];
-  if (!isLF && pickedResult) {
+  if (!isLF && !isUnit && pickedResult) {
     quoteRows.push({ label: isBook ? `Inside pages (${normPages} pp, ${duplex ? 'double' : 'single'}-sided, ${pickedResult.name})` : `Printing (${duplex ? 'double' : 'single'}-sided, ${pickedResult.name})`, amount: pickedResult.cost });
     if (isBook && bestCover) quoteRows.push({ label: `Cover (${covDuplex ? 'double' : 'single'}-sided, ${bestCover.name})`, amount: bestCover.cost });
     if (lamination !== LAMINATION_NONE) {
@@ -119,6 +138,7 @@ export function computeDigitalQuote(job, rates, pickedSheet = null) {
   const sellPrice = totalCost * (1 + rates.markup / 100);
 
   return {
+    isUnit, unitItems: items, activeItem, unitQuote,
     isLF, isBook, isFold, dims, normPages, leavesPerCopy,
     comparison, bestSheet, pickedResult, coverComparison, bestCover,
     lfMaterials, activeMat, lfQuote, quoteRows, totalCost, sellPrice,
@@ -133,7 +153,7 @@ export function computeDigitalQuote(job, rates, pickedSheet = null) {
 export function digitalResultCells(calc, qty) {
   const values = [];
   const sheet = {}, cover = {};
-  if (!calc.isLF) {
+  if (!calc.isLF && !calc.isUnit) {
     for (const name of DIGITAL_SHEET_NAMES) {
       const r = calc.comparison[name];
       if (!r || !r.up) continue;
@@ -150,7 +170,8 @@ export function digitalResultCells(calc, qty) {
     }
   }
   let total = null;
-  const price = calc.isLF ? calc.lfQuote?.sell : (calc.pickedResult ? calc.sellPrice : null);
+  const price = calc.isUnit ? calc.unitQuote?.sell
+    : calc.isLF ? calc.lfQuote?.sell : (calc.pickedResult ? calc.sellPrice : null);
   if (price != null) { total = values.length; values.push([price, null]); }
   return { values, sheet, cover, total };
 }

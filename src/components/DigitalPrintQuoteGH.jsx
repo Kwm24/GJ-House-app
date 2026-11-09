@@ -12,6 +12,7 @@ import {
   DEFAULT_DIGITAL_RATES, DIGITAL_STOCK_NAMES,
   LAMINATION_NONE, laminationOptions,
   DIGITAL_SIZES, digitalSizeLabel,
+  UNIT_JOB_LABELS, isUnitJob, mergeDigitalRates,
 } from "../lib/digitalPrintSpecs.js";
 import { UNIT_KEYS, convertLength, fmtDims } from "../lib/units.js";
 import { computeDigitalQuote } from "../lib/digitalQuoteCalc.js";
@@ -31,19 +32,26 @@ const JOB_PRESETS = {
   book:    { size: 'A5 (148×210)',          duplex: true,  qty: 100  },
   banner:  { size: 'A4 (210×297)',          duplex: false, qty: 1    },
   sticker: { size: 'A4 (210×297)',          duplex: false, qty: 100  },
+  rollup:  { size: 'A4 (210×297)',          duplex: false, qty: 1    },
+  tshirt:  { size: 'A4 (210×297)',          duplex: false, qty: 20   },
+  souvenir:{ size: 'A4 (210×297)',          duplex: false, qty: 50   },
   custom:  { size: 'A4 (210×297)',          duplex: false, qty: 500  },
 };
 
 const JOB_TYPES = [
   { value: 'flyer',    label: 'Flyer / Leaflet / Poster' },
   { value: 'card',     label: 'Business Card' },
-  { value: 'brochure', label: 'Brochure (bi-fold)' },
   { value: 'trifold',  label: 'Trifold Brochure' },
   { value: 'book',     label: 'Booklet / Book with cover' },
   { value: 'banner',   label: 'Banner (price per area)' },
   { value: 'sticker',  label: 'Sticker (price per area)' },
+  { value: 'rollup',   label: 'Roll-up banner (price per piece)' },
+  { value: 'tshirt',   label: 'T-shirt printing (price per piece)' },
+  { value: 'souvenir', label: 'Souvenir branding: mugs, cups, pens… (price per piece)' },
   { value: 'custom',   label: 'Other / Custom' },
 ];
+// Bi-fold brochures are no longer offered, but old saved quotes still open.
+const LEGACY_JOB_TYPES = [{ value: 'brochure', label: 'Brochure (bi-fold, discontinued)' }];
 
 
 function genDigitalRef() {
@@ -55,6 +63,9 @@ function genDigitalRef() {
 
 export function buildDigitalSpecSummary(snap) {
   const j = snap.job || {};
+  if (isUnitJob(j.jobType)) {
+    return `${UNIT_JOB_LABELS[j.jobType]}: ${j.unitItem || '—'} · ${j.qty} piece${j.qty === 1 ? '' : 's'}`;
+  }
   const isLF = j.jobType === 'banner' || j.jobType === 'sticker';
   if (isLF) {
     const label = j.jobType === 'banner' ? 'Banner' : 'Sticker';
@@ -131,13 +142,16 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
   }
   const [lfMat,    setLfMat]    = useState(initJob.lfMat    || '');
 
+  // Per-piece products (roll-up banners, T-shirts, souvenirs)
+  const [unitItem, setUnitItem] = useState(initJob.unitItem || '');
+
   // Selected sheet (null = auto-cheapest)
   const [pickedSheet, setPickedSheet] = useState(null);
 
   // Load rates from settings
   useEffect(() => {
     getSettings()
-      .then((s) => { if (s?.digital_quote_rates) setRates((r) => deepMerge(r, s.digital_quote_rates)); })
+      .then((s) => { if (s?.digital_quote_rates) setRates((r) => mergeDigitalRates(s.digital_quote_rates, r)); })
       .catch(() => {});
   }, []);
 
@@ -148,6 +162,7 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
     setDuplex(pre.duplex);
     setQty(pre.qty);
     setPickedSheet(null);
+    setUnitItem('');
     if (type === 'banner') { setLfWidth(6); setLfUnit('ft'); }
     if (type === 'sticker') { setLfWidth(10); setLfHeight(10); setLfUnit('cm'); }
   }
@@ -156,24 +171,28 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
   const calc = useMemo(() => computeDigitalQuote({
     jobType, sizeKey, customW, customH, qty, stock, duplex, extra,
     pages, bindType, spine, coverStock, covDuplex, lamination,
-    lfWidth, lfHeight, lfUnit, lfMat,
+    lfWidth, lfHeight, lfUnit, lfMat, unitItem, unitCost: initJob.unitItem === unitItem ? initJob.unitCost : undefined,
   }, rates, pickedSheet), [jobType, sizeKey, customW, customH, qty, stock, duplex, extra,
-    pages, bindType, spine, coverStock, covDuplex, lamination, lfWidth, lfHeight, lfUnit, lfMat, rates, pickedSheet]);
+    pages, bindType, spine, coverStock, covDuplex, lamination, lfWidth, lfHeight, lfUnit, lfMat, unitItem,
+    initJob.unitItem, initJob.unitCost, rates, pickedSheet]);
   const {
+    isUnit, unitItems: unitList, unitQuote,
     isLF, isBook, isFold, pickedResult, lfMaterials, activeMat, lfQuote, totalCost, sellPrice,
   } = calc;
+  const flat = isUnit ? unitQuote : isLF ? lfQuote : null;   // quotes not priced per sheet
 
   // ── Save quote ──────────────────────────────────────────────────────────────
   function handleSave() {
-    const isSellable = isLF ? (lfQuote && lfQuote.sell > 0) : (pickedResult && sellPrice > 0);
+    const isSellable = (isLF || isUnit) ? (flat && flat.sell > 0) : (pickedResult && sellPrice > 0);
     if (!isSellable) { setSaveMsg("Generate a quote first before saving."); return; }
 
-    const cost  = isLF ? lfQuote.cost : totalCost;
-    const sell  = isLF ? lfQuote.sell : sellPrice;
-    const mu    = isLF ? rates.lfMarkup : rates.markup;
+    const cost  = flat ? flat.cost : totalCost;
+    const sell  = flat ? flat.sell : sellPrice;
+    const mu    = isUnit ? unitQuote.markup : isLF ? rates.lfMarkup : rates.markup;
+    const unitFields = isUnit ? { unitItem: unitQuote.item, unitCost: unitQuote.unitCost } : {};
 
     const description = buildDigitalSpecSummary({
-      job: { jobType, sizeKey, customW, customH, qty, stock, duplex, pages, bindType, spine, coverStock, covDuplex, lamination: isLF ? LAMINATION_NONE : lamination, extra, lfWidth, lfHeight, lfUnit, lfMat: activeMat, dimUnit },
+      job: { jobType, sizeKey, customW, customH, qty, stock, duplex, pages, bindType, spine, coverStock, covDuplex, lamination: (isLF || isUnit) ? LAMINATION_NONE : lamination, extra, lfWidth, lfHeight, lfUnit, lfMat: activeMat, dimUnit, ...unitFields },
       result: { sheetName: pickedResult?.name },
     });
 
@@ -182,7 +201,7 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
       date:       new Date().toISOString().slice(0, 10),
       clientName, clientPhone, clientEmail, jobTitle,
       quoteType:  'digital',
-      job: { jobType, sizeKey, customW, customH, qty, stock, duplex, pages, bindType, spine, coverStock, covDuplex, lamination: isLF ? LAMINATION_NONE : lamination, extra, lfWidth, lfHeight, lfUnit, lfMat: activeMat, dimUnit },
+      job: { jobType, sizeKey, customW, customH, qty, stock, duplex, pages, bindType, spine, coverStock, covDuplex, lamination: (isLF || isUnit) ? LAMINATION_NONE : lamination, extra, lfWidth, lfHeight, lfUnit, lfMat: activeMat, dimUnit, ...unitFields },
       result: {
         qty,
         totalCost: cost,
@@ -191,7 +210,8 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
         profit:    sell - cost,
         perCopy:   Math.round(sell / qty * 100) / 100,
         isLF,
-        sheetName: pickedResult?.name || null,
+        isUnit,
+        sheetName: (isLF || isUnit) ? null : (pickedResult?.name || null),
         description,
       },
       rates,
@@ -283,10 +303,34 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
             <label className={cls.label}>Job type</label>
             <select className={cls.select} value={jobType} onChange={(e) => setJobType(e.target.value)}>
               {JOB_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              {LEGACY_JOB_TYPES.filter((t) => t.value === jobType).map((t) => <option key={t.value} value={t.value} disabled>{t.label}</option>)}
             </select>
           </div>
 
-          {!isLF && (
+          {isUnit && (
+            <>
+              <div className="sm:col-span-2">
+                <label className={cls.label}>{jobType === 'rollup' ? 'Material (80 × 200 cm)' : jobType === 'tshirt' ? 'Shirt & print' : 'Item'}</label>
+                <select className={cls.select} value={calc.activeItem?.name || unitItem} onChange={(e) => setUnitItem(e.target.value)}>
+                  {!calc.activeItem && unitItem && <option value={unitItem}>{unitItem} (no longer listed)</option>}
+                  {unitList.map((i) => <option key={i.name} value={i.name}>{i.name} · cost GH₵ {Number(i.cost).toFixed(2)}</option>)}
+                </select>
+                {unitList.length === 0 && (
+                  <p className="mt-1 text-[10px] text-[var(--t-muted)]">No items yet. Add them in Settings → Digital print rates → Priced per piece.</p>
+                )}
+              </div>
+              <div>
+                <label className={cls.label}>Quantity (pieces)</label>
+                <input type="number" min="1" className={cls.input} value={qty} onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} />
+              </div>
+              <div>
+                <label className={cls.label}>Other extras per piece (GH₵)</label>
+                <input type="number" step="0.01" min="0" className={cls.input} value={extra} onChange={(e) => setExtra(parseFloat(e.target.value) || 0)} />
+              </div>
+            </>
+          )}
+
+          {!isLF && !isUnit && (
             <>
               <div>
                 <label className={cls.label}>{isBook ? 'Page size (trim)' : isFold ? 'Flat (open) size' : 'Finished size'}</label>
@@ -407,14 +451,4 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
         pickedSheet={pickedSheet} onPickSheet={setPickedSheet} />
     </div>
   );
-}
-
-function deepMerge(target, source) {
-  const out = { ...target };
-  for (const k of Object.keys(source)) {
-    if (source[k] !== null && typeof source[k] === 'object' && !Array.isArray(source[k])) {
-      out[k] = deepMerge(target[k] || {}, source[k]);
-    } else { out[k] = source[k]; }
-  }
-  return out;
 }

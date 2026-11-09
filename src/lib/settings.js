@@ -30,6 +30,20 @@ export async function uploadStepImage(index, file) {
   return publicUrl;
 }
 
+// Image for a "Why Choose Us" point on the landing page.
+export async function uploadFeatureImage(index, file) {
+  const ext = file.name.split(".").pop() || "jpg";
+  const path = `landing/feature-${index}-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage
+    .from("company-assets")
+    .upload(path, file, { upsert: true, cacheControl: "3600" });
+  if (error) throw error;
+  const { data: { publicUrl } } = supabase.storage
+    .from("company-assets")
+    .getPublicUrl(path);
+  return publicUrl;
+}
+
 // Background image for every sign-in / sign-up screen.
 export async function uploadLoginBackground(file) {
   const ext = file.name.split(".").pop() || "jpg";
@@ -112,9 +126,13 @@ export async function getSettings() {
   return data;
 }
 
+// `jobType` is a job type ("flyer") or an item key ("souvenir:Ceramic mug").
 export async function uploadQuoterThumbnail(jobType, file) {
-  const ext = file.name.split(".").pop() || "jpg";
-  const path = `quoter/${jobType}.${ext}`;
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  // Storage paths: letters, digits and dashes only ("souvenir:Ceramic mug" → souvenir/ceramic-mug)
+  const slug = String(jobType).split(":").map((part) =>
+    part.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "item").join("/");
+  const path = `quoter/${slug}.${ext}`;
   const { error } = await supabase.storage
     .from("company-assets")
     .upload(path, file, { upsert: true, cacheControl: "3600" });
@@ -122,9 +140,11 @@ export async function uploadQuoterThumbnail(jobType, file) {
   const { data: { publicUrl } } = supabase.storage
     .from("company-assets")
     .getPublicUrl(path);
+  // Version the URL so a replaced image shows straight away (not the cached one)
+  const url = `${publicUrl}?v=${Date.now()}`;
   const existing = (await getSettings())?.instant_quoter_thumbnails || {};
-  await updateSettings({ instant_quoter_thumbnails: { ...existing, [jobType]: publicUrl } });
-  return publicUrl;
+  await updateSettings({ instant_quoter_thumbnails: { ...existing, [jobType]: url } });
+  return url;
 }
 
 export async function updateSettings(patch) {
