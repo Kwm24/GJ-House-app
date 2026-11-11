@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { getSettings, saveDigitalRates } from "../lib/settings.js";
 import {
   DEFAULT_DIGITAL_RATES, DIGITAL_SHEET_NAMES, DIGITAL_STOCK_NAMES,
-  UNIT_JOB_TYPES, UNIT_JOB_LABELS, mergeDigitalRates,
+  UNIT_JOB_TYPES, UNIT_JOB_LABELS, mergeDigitalRates, hasPrintSides,
 } from "../lib/digitalPrintSpecs.js";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -58,10 +58,10 @@ export function DigitalRatesEditor({ asProduction = false, onSaved }) {
     setDRates((r) => ({ ...r, unit: { ...(r.unit || {}), [type]: fn([...(r.unit?.[type] || [])]) } }));
   }
   function setUnitItem(type, i, field, value) {
-    setUnitList(type, (list) => { list[i] = { ...list[i], [field]: field === "cost" ? Number(value) : value }; return list; });
+    setUnitList(type, (list) => { list[i] = { ...list[i], [field]: field === "name" ? value : Number(value) }; return list; });
   }
   function addUnitItem(type) {
-    setUnitList(type, (list) => [...list, { name: "", cost: 0 }]);
+    setUnitList(type, (list) => [...list, hasPrintSides(type) ? { name: "", cost: 0, backCost: 0 } : { name: "", cost: 0 }]);
   }
   function removeUnitItem(type, i) {
     setUnitList(type, (list) => list.filter((_, j) => j !== i));
@@ -78,7 +78,11 @@ export function DigitalRatesEditor({ asProduction = false, onSaved }) {
     }
     const toSave = {
       ...dRates,
-      unit: Object.fromEntries(UNIT_JOB_TYPES.map((t) => [t, (dRates.unit?.[t] || []).map((i) => ({ name: i.name.trim(), cost: Number(i.cost) || 0 }))])),
+      unit: Object.fromEntries(UNIT_JOB_TYPES.map((t) => [t, (dRates.unit?.[t] || []).map((i) => ({
+        name: i.name.trim(),
+        cost: Number(i.cost) || 0,
+        ...(hasPrintSides(t) ? { backCost: Number(i.backCost) || 0 } : {}),
+      }))])),
     };
     setSavingDRates(true);
     try {
@@ -247,6 +251,9 @@ export function DigitalRatesEditor({ asProduction = false, onSaved }) {
           return (
             <div key={type} className="rounded-lg border border-gray-200 bg-white/60 p-3">
               <p className="mb-2 text-sm font-semibold text-brand-dark">{UNIT_JOB_LABELS[type]}</p>
+              {hasPrintSides(type) && (
+                <p className="-mt-1 mb-2 text-[11px] text-gray-500">Name · cost with <b>front</b> print · <b>extra</b> to also print the back</p>
+              )}
               <div className="space-y-2">
                 {list.map((item, i) => (
                   <div key={i} className="flex items-center gap-2">
@@ -255,9 +262,17 @@ export function DigitalRatesEditor({ asProduction = false, onSaved }) {
                       onChange={(e) => setUnitItem(type, i, "name", e.target.value)}
                       className={inputClass + " min-w-0 flex-1"} />
                     <input type="number" step="0.01" min="0" value={item.cost}
-                      aria-label={`${item.name || "Item"} cost`}
+                      aria-label={`${item.name || "Item"} cost${hasPrintSides(type) ? " (front print)" : ""}`}
+                      title={hasPrintSides(type) ? "Cost with front print" : "Cost per piece"}
                       onChange={(e) => setUnitItem(type, i, "cost", e.target.value)}
                       className={inputClass} style={{ maxWidth: 90 }} />
+                    {hasPrintSides(type) && (
+                      <input type="number" step="0.01" min="0" value={item.backCost ?? 0}
+                        aria-label={`${item.name || "Item"} extra cost to print the back`}
+                        title="Extra cost per piece to also print the back"
+                        onChange={(e) => setUnitItem(type, i, "backCost", e.target.value)}
+                        className={inputClass} style={{ maxWidth: 80 }} />
+                    )}
                     <button type="button" onClick={() => removeUnitItem(type, i)}
                       aria-label={`Remove ${item.name || "item"}`}
                       className="shrink-0 rounded-md p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors">

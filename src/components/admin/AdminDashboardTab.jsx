@@ -13,7 +13,8 @@ import { PeriodPicker, filterByPeriod, defaultPeriod } from "../PeriodPicker.jsx
 const CHART_STATUSES = [
   { status: "approved",         label: "Approved",         color: "#3B82F6" },
   { status: "ready_for_design", label: "Ready for Design", color: "#A855F7" },
-  { status: "design_ready",     label: "Design Ready",     color: "#EC4899" },
+  { status: "design_review",    label: "Awaiting Approval", color: "#F59E0B" },
+  { status: "design_ready",     label: "Design Approved",  color: "#EC4899" },
   { status: "in_production",    label: "In Production",    color: "#F59E0B" },
   { status: "at_finishing",     label: "At Finishing",     color: "#F97316" },
   { status: "ready_for_pickup", label: "Ready for Pickup", color: "#14B8A6" },

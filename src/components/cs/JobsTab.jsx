@@ -45,6 +45,7 @@ const STATUS_BADGE = {
   approved:         "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20",
   in_production:    "bg-amber-50 text-amber-700 dark:bg-amber-900/20",
   ready_for_design: "bg-purple-50 text-purple-700 dark:bg-purple-900/20",
+  design_review:    "bg-amber-50 text-amber-800 dark:bg-amber-900/20",
   design_ready:     "bg-indigo-50 text-[#6366F1] dark:bg-indigo-900/20",
   at_finishing:     "bg-orange-50 text-orange-700 dark:bg-orange-900/20",
   ready_for_pickup: "bg-teal-50 text-teal-700 dark:bg-teal-900/20",
@@ -512,7 +513,7 @@ export function JobsTab({ focusJobId }) {
                   </div>
 
                   {/* Send to Design Team */}
-                  {needsDesign && job.status !== "ready_for_design" && job.status !== "design_ready" && (
+                  {needsDesign && !job.design_approved && !["ready_for_design", "design_review", "design_ready"].includes(job.status) && (
                     <div className="rounded-xl bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 p-4">
                       <p className="text-sm font-semibold text-purple-800 dark:text-purple-300 mb-1">🎨 Needs design work</p>
                       <p className="text-xs text-purple-600 dark:text-purple-400 mb-3">
@@ -546,9 +547,15 @@ export function JobsTab({ focusJobId }) {
                     </div>
                   )}
 
-                  {needsDesign && job.status === "design_ready" && (
+                  {needsDesign && job.status === "design_review" && (
+                    <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-4 py-3">
+                      <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">⏳ Design sent to the customer, waiting for their approval</p>
+                    </div>
+                  )}
+
+                  {needsDesign && job.design_approved && (
                     <div className="rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 px-4 py-3">
-                      <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">✓ Design completed by designer</p>
+                      <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">✓ Customer approved the design</p>
                     </div>
                   )}
 

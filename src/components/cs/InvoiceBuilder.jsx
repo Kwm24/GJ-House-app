@@ -24,6 +24,8 @@ import { offsetBookLabel } from "../../lib/printSpecs.js";
 // record payment — CS no longer marks invoices as paid directly.
 import { formatGHS as GHS } from "../../lib/currency.js";
 import { CustomerPicker } from "../CustomerPicker.jsx";
+import { getCustomerContact } from "../../lib/customerProfile.js";
+import { waDigits } from "../../lib/jobNotify.js";
 import { QuotePicker } from "./QuotePicker.jsx";
 
 const VAT_RATE = 0.20;
@@ -545,8 +547,18 @@ export default function InvoiceBuilder({
         // Saved quote snapshot(s) — so the SpecSheet can render in Production/
         // Designer when the job is created later via the Accounts payment flow.
         quote_snapshot:   invoiceQuoteSnapshot(validLines, legacyQuoteSnapshot, { ref, clientName, clientPhone, total }),
+        // Quotation this invoice was converted from (migration 041)
+        ...(initial?.source_ref ? { source_ref: initial.source_ref } : {}),
       };
-      const result = await saveInvoice(payload, isEdit ? initial.id : null);
+      let result;
+      try {
+        result = await saveInvoice(payload, isEdit ? initial.id : null);
+      } catch (err) {
+        // Column not there yet (041 not run): save without the link
+        if (!payload.source_ref || !String(err.message || "").includes("source_ref")) throw err;
+        delete payload.source_ref;
+        result = await saveInvoice(payload, isEdit ? initial.id : null);
+      }
       if (overrideStatus) setDocStatus(overrideStatus);
       onSaved(result);
       return true;
@@ -565,7 +577,9 @@ export default function InvoiceBuilder({
   // automatically and a receipt appears in the customer's portal.
 
   // ── Send via Email — print first, then open mailto
-  function handleSendEmail() {
+  async function handleSendEmail() {
+    // A linked customer's own contact email, if the form has none
+    const linked = linkedCustomerId && !clientEmail ? await getCustomerContact(linkedCustomerId) : null;
     handlePrint();
     const typeLabel = docType === "receipt" ? "Receipt"
       : docType === "invoice" ? "Invoice" : "Quotation";
@@ -593,14 +607,17 @@ export default function InvoiceBuilder({
     ].filter((l) => l !== null).join("\n");
 
     const subject = encodeURIComponent(`${typeLabel} ${ref} from ${company.name}`);
-    const to = clientEmail ? encodeURIComponent(clientEmail) : "";
+    const toAddr = clientEmail || linked?.email || "";
+    const to = toAddr ? encodeURIComponent(toAddr) : "";
     setTimeout(() => {
       window.location.href = `mailto:${to}?subject=${subject}&body=${encodeURIComponent(body)}`;
     }, 600);
   }
 
   // ── Send via WhatsApp — print first, then open wa.me
-  function handleSendWhatsApp() {
+  async function handleSendWhatsApp() {
+    // Send to the linked customer's WhatsApp number (from their profile) first
+    const linked = linkedCustomerId ? await getCustomerContact(linkedCustomerId) : null;
     handlePrint();
     const typeLabel = docType === "receipt" ? "Receipt"
       : docType === "invoice" ? "Invoice" : "Quotation";
@@ -620,7 +637,7 @@ export default function InvoiceBuilder({
       docType === "quote" ? `Deposit (60%): ${fmtAmt(round2(total * 0.6))}` : null,
     ].filter((l) => l !== null).join("\n");
 
-    const phone = (clientPhone || "").replace(/\D/g, "");
+    const phone = waDigits(linked?.whatsapp || clientPhone);
     const waUrl = phone
       ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
       : `https://wa.me/?text=${encodeURIComponent(msg)}`;

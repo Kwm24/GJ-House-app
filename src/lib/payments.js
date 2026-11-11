@@ -41,6 +41,14 @@ export async function createPayment({ jobId, amount, type, method, date, recorde
   return data;
 }
 
+// Total received so far on a job (all its payment records).
+export async function sumPaymentsForJob(jobId) {
+  if (!jobId) return 0;
+  const { data, error } = await supabase.from("payments").select("amount").eq("job_id", jobId);
+  if (error) throw error;
+  return Math.round((data ?? []).reduce((s, p) => s + Number(p.amount || 0), 0) * 100) / 100;
+}
+
 export async function deletePayment(id) {
   const { error } = await supabase.from("payments").delete().eq("id", id);
   if (error) throw error;

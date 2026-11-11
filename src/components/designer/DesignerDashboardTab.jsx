@@ -18,7 +18,7 @@ const DONE = ["delivered", "completed"];
 function designStage(j) {
   if (j.design_approved) return "approved";
   if (j.status === "ready_for_design") return "to_design";
-  if (j.status === "design_ready") return "with_customer";
+  if (j.status === "design_review" || j.status === "design_ready") return "with_customer";
   return "other";
 }
 

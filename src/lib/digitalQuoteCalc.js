@@ -4,7 +4,7 @@
  * Accounts cost breakdown (which re-runs it on a saved quote's job + rates so
  * it shows exactly what the quoter showed).
  */
-import { DIGITAL_SHEET_NAMES, DIGITAL_SIZES, LAMINATION_NONE, laminationCost, isUnitJob, unitItems } from "./digitalPrintSpecs.js";
+import { DIGITAL_SHEET_NAMES, DIGITAL_SIZES, LAMINATION_NONE, laminationCost, isUnitJob, unitItems, hasPrintSides, printSidesLabel, unitItemCost } from "./digitalPrintSpecs.js";
 import { UNIT_TO_M } from "./units.js";
 import { formatGHS as GHS } from "./currency.js";
 
@@ -51,7 +51,7 @@ export function computeDigitalQuote(job, rates, pickedSheet = null) {
     jobType, sizeKey, customW, customH, qty, stock, duplex, extra = 0,
     pages, bindType, spine, coverStock, covDuplex,
     lamination = LAMINATION_NONE, lfWidth, lfHeight, lfUnit, lfMat,
-    unitItem, unitCost: savedUnitCost,
+    unitItem, unitCost: savedUnitCost, printSides = 'front',
   } = job;
 
   const isUnit = isUnitJob(jobType);
@@ -102,14 +102,18 @@ export function computeDigitalQuote(job, rates, pickedSheet = null) {
   const activeItem = isUnit ? (items.find((i) => i.name === unitItem) || (unitItem ? null : items[0]) || null) : null;
   let unitQuote = null;
   if (isUnit) {
-    const name = activeItem?.name || unitItem || '';
-    const unitC = Number(activeItem ? activeItem.cost : savedUnitCost) || 0;
+    const name  = activeItem?.name || unitItem || '';
+    // Only quotes that recorded a print position show it (older ones named it in the item)
+    const sides = hasPrintSides(jobType) && job.printSides ? printSides : null;
+    // savedUnitCost already includes the back print (it's the per-piece cost quoted)
+    const unitC = activeItem ? unitItemCost(activeItem, jobType, printSides) : (Number(savedUnitCost) || 0);
     if (name && unitC > 0) {
-      const rows = [{ label: `${name} (${qty} × ${GHS(unitC)})`, amount: unitC * qty }];
+      const what = sides ? `${name}, ${printSidesLabel(sides)}` : name;
+      const rows = [{ label: `${what} (${qty} × ${GHS(unitC)})`, amount: unitC * qty }];
       if (extra) rows.push({ label: `Extras (${qty} × ${GHS(extra)})`, amount: qty * extra });
       const cost   = rows.reduce((s, r) => s + r.amount, 0);
       const markup = rates.unitMarkup ?? rates.markup ?? 0;
-      unitQuote = { rows, cost, sell: cost * (1 + markup / 100), markup, item: name, unitCost: unitC };
+      unitQuote = { rows, cost, sell: cost * (1 + markup / 100), markup, item: name, unitCost: unitC, printSides: sides };
     }
   }
 

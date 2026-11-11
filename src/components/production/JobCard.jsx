@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react";
 const STATUS_STYLE = {
   approved:         { border: "#10B981", badge: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20"   },
   ready_for_design: { border: "#A855F7", badge: "bg-purple-50 text-purple-700 dark:bg-purple-900/20"      },
+  design_review:    { border: "#F59E0B", badge: "bg-amber-50 text-amber-800 dark:bg-amber-900/20"       },
   design_ready:     { border: "#6366F1", badge: "bg-indigo-50 text-[#6366F1] dark:bg-indigo-900/20"       },
   in_production:    { border: "#F59E0B", badge: "bg-amber-50 text-amber-700 dark:bg-amber-900/20"         },
   at_finishing:     { border: "#F97316", badge: "bg-orange-50 text-orange-700 dark:bg-orange-900/20"      },

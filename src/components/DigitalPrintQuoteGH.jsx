@@ -13,6 +13,7 @@ import {
   LAMINATION_NONE, laminationOptions,
   DIGITAL_SIZES, digitalSizeLabel,
   UNIT_JOB_LABELS, isUnitJob, mergeDigitalRates,
+  PRINT_SIDES, hasPrintSides, printSidesLabel, unitItemCost,
 } from "../lib/digitalPrintSpecs.js";
 import { UNIT_KEYS, convertLength, fmtDims } from "../lib/units.js";
 import { computeDigitalQuote } from "../lib/digitalQuoteCalc.js";
@@ -64,7 +65,8 @@ function genDigitalRef() {
 export function buildDigitalSpecSummary(snap) {
   const j = snap.job || {};
   if (isUnitJob(j.jobType)) {
-    return `${UNIT_JOB_LABELS[j.jobType]}: ${j.unitItem || '—'} · ${j.qty} piece${j.qty === 1 ? '' : 's'}`;
+    const sides = hasPrintSides(j.jobType) ? ` (${printSidesLabel(j.printSides)})` : '';
+    return `${UNIT_JOB_LABELS[j.jobType]}: ${j.unitItem || '—'}${sides} · ${j.qty} piece${j.qty === 1 ? '' : 's'}`;
   }
   const isLF = j.jobType === 'banner' || j.jobType === 'sticker';
   if (isLF) {
@@ -144,6 +146,7 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
 
   // Per-piece products (roll-up banners, T-shirts, souvenirs)
   const [unitItem, setUnitItem] = useState(initJob.unitItem || '');
+  const [printSides, setPrintSides] = useState(initJob.printSides || 'front');   // T-shirts
 
   // Selected sheet (null = auto-cheapest)
   const [pickedSheet, setPickedSheet] = useState(null);
@@ -163,6 +166,7 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
     setQty(pre.qty);
     setPickedSheet(null);
     setUnitItem('');
+    setPrintSides('front');
     if (type === 'banner') { setLfWidth(6); setLfUnit('ft'); }
     if (type === 'sticker') { setLfWidth(10); setLfHeight(10); setLfUnit('cm'); }
   }
@@ -171,10 +175,11 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
   const calc = useMemo(() => computeDigitalQuote({
     jobType, sizeKey, customW, customH, qty, stock, duplex, extra,
     pages, bindType, spine, coverStock, covDuplex, lamination,
-    lfWidth, lfHeight, lfUnit, lfMat, unitItem, unitCost: initJob.unitItem === unitItem ? initJob.unitCost : undefined,
+    lfWidth, lfHeight, lfUnit, lfMat, unitItem, printSides,
+    unitCost: initJob.unitItem === unitItem && (initJob.printSides || 'front') === printSides ? initJob.unitCost : undefined,
   }, rates, pickedSheet), [jobType, sizeKey, customW, customH, qty, stock, duplex, extra,
-    pages, bindType, spine, coverStock, covDuplex, lamination, lfWidth, lfHeight, lfUnit, lfMat, unitItem,
-    initJob.unitItem, initJob.unitCost, rates, pickedSheet]);
+    pages, bindType, spine, coverStock, covDuplex, lamination, lfWidth, lfHeight, lfUnit, lfMat, unitItem, printSides,
+    initJob.unitItem, initJob.unitCost, initJob.printSides, rates, pickedSheet]);
   const {
     isUnit, unitItems: unitList, unitQuote,
     isLF, isBook, isFold, pickedResult, lfMaterials, activeMat, lfQuote, totalCost, sellPrice,
@@ -189,7 +194,9 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
     const cost  = flat ? flat.cost : totalCost;
     const sell  = flat ? flat.sell : sellPrice;
     const mu    = isUnit ? unitQuote.markup : isLF ? rates.lfMarkup : rates.markup;
-    const unitFields = isUnit ? { unitItem: unitQuote.item, unitCost: unitQuote.unitCost } : {};
+    const unitFields = isUnit
+      ? { unitItem: unitQuote.item, unitCost: unitQuote.unitCost, ...(hasPrintSides(jobType) ? { printSides } : {}) }
+      : {};
 
     const description = buildDigitalSpecSummary({
       job: { jobType, sizeKey, customW, customH, qty, stock, duplex, pages, bindType, spine, coverStock, covDuplex, lamination: (isLF || isUnit) ? LAMINATION_NONE : lamination, extra, lfWidth, lfHeight, lfUnit, lfMat: activeMat, dimUnit, ...unitFields },
@@ -313,12 +320,28 @@ export default function DigitalPrintQuoteGH({ initialQuote = null, onBack = null
                 <label className={cls.label}>{jobType === 'rollup' ? 'Material (80 × 200 cm)' : jobType === 'tshirt' ? 'Shirt & print' : 'Item'}</label>
                 <select className={cls.select} value={calc.activeItem?.name || unitItem} onChange={(e) => setUnitItem(e.target.value)}>
                   {!calc.activeItem && unitItem && <option value={unitItem}>{unitItem} (no longer listed)</option>}
-                  {unitList.map((i) => <option key={i.name} value={i.name}>{i.name} · cost GH₵ {Number(i.cost).toFixed(2)}</option>)}
+                  {unitList.map((i) => <option key={i.name} value={i.name}>{i.name} · cost GH₵ {unitItemCost(i, jobType, printSides).toFixed(2)}</option>)}
                 </select>
                 {unitList.length === 0 && (
                   <p className="mt-1 text-[10px] text-[var(--t-muted)]">No items yet. Add them in Settings → Digital print rates → Priced per piece.</p>
                 )}
               </div>
+              {hasPrintSides(jobType) && (
+                <div className="sm:col-span-2">
+                  <label className={cls.label}>Print position</label>
+                  <div className="flex gap-2">
+                    {PRINT_SIDES.map((p) => (
+                      <button key={p.value} type="button" aria-pressed={printSides === p.value} onClick={() => setPrintSides(p.value)}
+                        className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium border transition-colors ${printSides === p.value ? 'bg-[#6366F1] text-white border-[#6366F1]' : 'bg-[var(--t-bg)] text-[var(--t-text2)] border-[var(--t-border)] hover:border-[var(--t-text2)]'}`}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  {printSides === 'both' && calc.activeItem && (
+                    <p className="mt-1 text-[10px] text-[var(--t-muted)]">Back print adds GH₵ {(Number(calc.activeItem.backCost) || 0).toFixed(2)} cost per piece.</p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className={cls.label}>Quantity (pieces)</label>
                 <input type="number" min="1" className={cls.input} value={qty} onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} />

@@ -2,9 +2,11 @@
 export const ALL_STATUSES = [
   { value: "sent",             label: "Quote Sent"       },
   { value: "approved",         label: "Deposit Paid"     },
+  // Design steps: designer working → waiting for the customer → customer approved
+  { value: "ready_for_design", label: "In Design"                  },
+  { value: "design_review",    label: "Awaiting Customer Approval" },
+  { value: "design_ready",     label: "Design Approved"            },
   { value: "in_production",    label: "In Production"    },
-  { value: "ready_for_design", label: "Ready for Design" },
-  { value: "design_ready",     label: "Design Ready"     },
   { value: "at_finishing",     label: "At Finishing"     },
   { value: "ready_for_pickup", label: "Ready for Pickup" },
   { value: "delivered",        label: "Collected"        },

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, User, Briefcase, FileText, Edit2, Check, XCircle, KeyRound, ExternalLink, MapPin } from "lucide-react";
 import { CustomerDeliveryLocations } from "./delivery/DeliveryLocations.jsx";
+import { getCustomerContact } from "../lib/customerProfile.js";
 import { updateCustomerProfile, updateCustomerEmail, sendPasswordReset } from "../lib/auth.js";
 import { listJobsByCustomer, jobGrandTotal } from "../lib/jobs.js";
 import { listInvoicesByCustomer, STATUS_COLORS, TYPE_COLORS } from "../lib/invoices.js";
@@ -23,7 +24,8 @@ const TABS = [
 const JOB_STATUS_LABELS = {
   sent:             "Quote Sent",
   approved:         "Deposit Paid",
-  ready_for_design: "Design in Review",
+  ready_for_design: "In Design",
+  design_review:    "Awaiting Approval",
   design_ready:     "Design Approved",
   in_production:    "In Production",
   at_finishing:     "At Finishing",
@@ -36,6 +38,7 @@ const JOB_STATUS_COLORS = {
   sent:             "bg-blue-100 text-blue-800",
   approved:         "bg-green-100 text-green-800",
   ready_for_design: "bg-purple-100 text-purple-800",
+  design_review:    "bg-amber-100 text-amber-800",
   design_ready:     "bg-indigo-100 text-indigo-800",
   in_production:    "bg-amber-100 text-amber-800",
   at_finishing:     "bg-orange-100 text-orange-800",
@@ -86,6 +89,15 @@ export function CustomerProfilePanel({
 
   // local copy of profile so edits show immediately without closing
   const [localProfile, setLocalProfile] = useState(profile);
+
+  // What the customer filled in on their own Profile page (migration 042)
+  const [contact, setContact] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    getCustomerContact(profile?.user_id).then((c) => { if (!cancelled) setContact(c); });
+    return () => { cancelled = true; };
+  }, [profile?.user_id]);
+  const PREF_LABEL = { whatsapp: "WhatsApp", phone: "Phone call", email: "Email" };
 
   useEffect(() => {
     if (!profile?.user_id) return;
@@ -363,6 +375,9 @@ export function CustomerProfilePanel({
                     <Row label="Full Name"  value={localProfile.full_name || "—"} />
                     <Row label="Phone"      value={localProfile.phone || "—"} />
                     <Row label="Email"      value={localProfile.email || "—"} />
+                    {contact?.whatsapp && <Row label="WhatsApp" value={contact.whatsapp} />}
+                    {contact?.email && contact.email !== localProfile.email && <Row label="Contact email" value={contact.email} />}
+                    {contact?.preferred && <Row label="Prefers" value={PREF_LABEL[contact.preferred] || contact.preferred} />}
                     <Row label="Joined"     value={fmtDate(localProfile.created_at)} />
                   </dl>
                 )}

@@ -126,12 +126,12 @@ export async function listProductionJobs() {
 }
 
 // Jobs the Designer lobby's job list should show:
-// anything in ready_for_design, OR flagged needs_design but not yet terminal.
+// anything in a design step, OR flagged needs_design but not yet terminal.
 export async function listDesignerJobs() {
   const { data, error } = await supabase
     .from("jobs")
     .select("*")
-    .or("status.eq.ready_for_design,and(needs_design.eq.true,status.neq.delivered,status.neq.completed)")
+    .or("status.in.(ready_for_design,design_review),and(needs_design.eq.true,status.neq.delivered,status.neq.completed)")
     .order("deadline", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false });
 
@@ -193,6 +193,23 @@ export async function updateJobStatus(jobId, status) {
   return data;
 }
 
+// The designer's "design ready by" date (migration 044), shown to the customer.
+export async function updateJobDesignDue(jobId, designDue) {
+  const { data, error } = await supabase
+    .from("jobs")
+    .update({ design_due: designDue || null })
+    .eq("id", jobId)
+    .select()
+    .single();
+  if (error) {
+    if (String(error.message || "").includes("design_due")) {
+      throw new Error("Run supabase/044_targeted_notifications_and_design_due.sql in Supabase first.");
+    }
+    throw error;
+  }
+  return data;
+}
+
 export async function updateJobDeadline(jobId, deadline) {
   const { data, error } = await supabase
     .from("jobs")
@@ -219,32 +236,67 @@ export async function assignCustomerToJob(jobId, customerUserId) {
   return data;
 }
 
-// Create a job from invoice data when CS marks an invoice as paid.
-// If a job already exists for this ref, just update its status to "approved".
-// Non-fatal on duplicate — the invoice save already succeeded.
+const TERMINAL = ["delivered", "completed", "cancelled"];
+
+// The job an invoice's payment belongs to, if one already exists:
+//   1. a job created from this document or the quotation it was converted from
+//   2. an open job created from the same saved quote, for the same customer
+async function findJobForInvoice({ refs, quoteSnapshot, customerId }) {
+  const { data: byRef, error } = await supabase
+    .from("jobs")
+    .select("id, status, created_at")
+    .in("quote_ref", refs)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (error) throw error;
+  if (byRef?.length) return byRef[0];
+
+  const snapRef = quoteSnapshot?.quoteType !== "multi" ? quoteSnapshot?.ref : null;
+  if (snapRef && customerId) {
+    const { data: bySnap, error: e2 } = await supabase
+      .from("jobs")
+      .select("id, status, created_at")
+      .eq("quote->>ref", snapRef)
+      .eq("customer_id", customerId)
+      .not("status", "in", `(${TERMINAL.join(",")})`)
+      .order("created_at", { ascending: true })
+      .limit(1);
+    if (e2) throw e2;
+    if (bySnap?.length) return bySnap[0];
+  }
+  return null;
+}
+
+// Create a job from invoice data when Accounts records a payment.
+// If the order already has a job (an earlier deposit, or the quotation this
+// invoice was converted from), that job is reused. An existing job's status
+// is never moved backwards: a balance payment on a job that's in design or
+// production leaves it where it is.
 export async function createJobFromInvoice(userId, {
-  ref, clientName, clientPhone, jobTitle, total, needsDesign, quoteSnapshot,
+  ref, sourceRef, clientName, clientPhone, jobTitle, total, needsDesign, quoteSnapshot,
   customerId,   // optional: links the job to a registered customer account
 }) {
-  // Check for an existing job with the same ref to avoid duplicates
-  const { data: existing } = await supabase
-    .from("jobs")
-    .select("id")
-    .eq("quote_ref", ref)
-    .maybeSingle();
+  const refs = [...new Set([ref, sourceRef].filter(Boolean))];
+  const existing = await findJobForInvoice({ refs, quoteSnapshot, customerId });
 
   if (existing) {
-    const patch = { status: needsDesign ? "ready_for_design" : "approved" };
-    // Carry the customer link across if we now know who the customer is
+    const { data, error } = await supabase.rpc("confirm_job_payment", {
+      p_job_id:       existing.id,
+      p_customer_id:  customerId || null,
+      p_needs_design: !!needsDesign,
+    });
+    if (!error) return Array.isArray(data) ? data[0] : data;
+    if (error.code !== "PGRST202") throw error;
+
+    // Migration 041 not run yet: same forward-only rule, done directly
+    const patch = {};
+    if (existing.status === "sent") patch.status = needsDesign ? "ready_for_design" : "approved";
     if (customerId) patch.customer_id = customerId;
-    const { data, error } = await supabase
-      .from("jobs")
-      .update(patch)
-      .eq("id", existing.id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
+    if (!Object.keys(patch).length) return existing;
+    const { data: upd, error: updErr } = await supabase
+      .from("jobs").update(patch).eq("id", existing.id).select().maybeSingle();
+    if (updErr) throw updErr;
+    return upd ?? existing;
   }
 
   const depositAmount = Math.round(Number(total || 0) * 0.6 * 100) / 100;
@@ -294,9 +346,15 @@ export async function listAllJobsForCS() {
 
 // All jobs visible to the currently logged-in customer.
 export async function listCustomerJobs() {
+  // Filter explicitly too: staff accounts can read every job, so relying on
+  // row security alone would show them other customers' jobs here.
+  const { data: { session } } = await supabase.auth.getSession();
+  const uid = session?.user?.id;
+  if (!uid) return [];
   const { data, error } = await supabase
     .from("jobs")
     .select("*")
+    .eq("customer_id", uid)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -448,7 +506,8 @@ export async function deleteJob(jobId) {
 }
 
 // Customer approves the designer's artwork — sets design_approved=true and
-// moves the job to design_ready, giving production the green light.
+// moves the job from design_review to design_ready, giving production the
+// green light (migration 041 only allows it while the design awaits them).
 // Uses a SECURITY DEFINER RPC so customers don't need a broad UPDATE policy.
 export async function approveDesign(jobId) {
   const { error } = await supabase.rpc("approve_job_design", { p_job_id: jobId });

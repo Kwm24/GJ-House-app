@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import { getJob } from "../../lib/jobs.js";
+import { getJob, updateJobDesignDue } from "../../lib/jobs.js";
 import { getInvoiceByRef } from "../../lib/invoices.js";
 import { buildWhatsAppChatUrl } from "../../lib/jobNotify.js";
+import { getJobCustomerContact } from "../../lib/customerProfile.js";
 import { SpecSheet } from "../SpecSheet.jsx";
 import { ResourcesTab } from "./ResourcesTab.jsx";
 import { DesignUploadTab } from "./DesignUploadTab.jsx";
@@ -18,6 +19,30 @@ export function JobDetail({ jobId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("spec");
+  // Customer's own WhatsApp number (profile) before the invoice's typed phone
+  const [contact, setContact] = useState(null);
+  useEffect(() => {
+    if (!job) return;
+    let cancelled = false;
+    getJobCustomerContact(job).then((c) => { if (!cancelled) setContact(c); });
+    return () => { cancelled = true; };
+  }, [job]);
+  const waNumber = contact?.whatsapp || job?.client_phone;
+
+  // "Design ready by": the customer sees it in their portal
+  const [dueSaving, setDueSaving] = useState(false);
+  async function handleDesignDueChange(e) {
+    setDueSaving(true);
+    setError("");
+    try {
+      const updated = await updateJobDesignDue(job.id, e.target.value);
+      setJob((j) => ({ ...j, ...updated }));
+    } catch (err) {
+      setError(err.message ?? "Could not save the design date.");
+    } finally {
+      setDueSaving(false);
+    }
+  }
   // Invoice lines let the spec sheet show every print quote on a multi-quote invoice
   const [invoiceLineItems, setInvoiceLineItems] = useState([]);
 
@@ -99,15 +124,40 @@ export function JobDetail({ jobId, onBack }) {
               <span className="font-mono">{job.quote_ref}</span>
             </p>
           </div>
-          {job.client_phone && (
+          {waNumber && (
             <a
-              href={buildWhatsAppChatUrl(job.client_phone)}
+              href={buildWhatsAppChatUrl(waNumber)}
               target="_blank"
               rel="noopener noreferrer"
               className="shrink-0 flex items-center gap-1.5 rounded-lg bg-[#25D366] text-white text-sm font-medium px-4 py-2 hover:bg-[#1ebe5a] transition-colors"
             >
               WhatsApp client
             </a>
+          )}
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="design-due" className="block text-xs font-medium text-[var(--t-muted)] mb-1.5">
+              Design finishing time (ready for the customer by)
+            </label>
+            <input
+              id="design-due"
+              type="date"
+              value={job.design_due ?? ""}
+              onChange={handleDesignDueChange}
+              disabled={dueSaving}
+              className="w-full rounded-lg border border-[var(--t-border)] bg-[var(--t-bg)] px-3 py-2.5 text-sm text-[var(--t-text1)] focus:outline-none focus:ring-2 focus:ring-brand-red/40 focus:border-brand-red disabled:opacity-60"
+            />
+            <p className="mt-1 text-[11px] text-[var(--t-muted)]">The customer sees this date and is notified when you set or change it.</p>
+          </div>
+          {job.deadline && (
+            <div>
+              <p className="block text-xs font-medium text-[var(--t-muted)] mb-1.5">Job finishing time (production)</p>
+              <p className="py-2.5 text-sm text-[var(--t-text1)]">
+                {new Date(`${job.deadline}T00:00:00`).toLocaleDateString("en-GH", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+              </p>
+            </div>
           )}
         </div>
       </div>

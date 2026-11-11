@@ -77,17 +77,16 @@ export const DEFAULT_DIGITAL_RATES = {
       { name: 'Roll-up banner 80 × 200 cm, Flexy', cost: 350 },
       { name: 'Roll-up banner 80 × 200 cm, PVC',   cost: 450 },
     ],
+    // cost = shirt + front print; backCost = extra per piece to print the back too
     tshirt: [
-      { name: 'Round-neck T-shirt, front print',          cost: 45 },
-      { name: 'Round-neck T-shirt, front & back print',   cost: 60 },
-      { name: 'Polo shirt, front print',                  cost: 65 },
-      { name: 'Print only (customer brings the shirt)',   cost: 20 },
+      { name: 'Round neck T-shirt', cost: 45, backCost: 15 },
+      { name: 'Polo shirt',         cost: 65, backCost: 15 },
     ],
     souvenir: [
       { name: 'Ceramic mug',                  cost: 25 },
-      { name: 'Magic (colour-changing) mug',  cost: 40 },
+      { name: 'Stanley cup / thermos flask',  cost: 150 },
       { name: 'Plastic cup',                  cost: 8 },
-      { name: 'Paper cup',                    cost: 3 },
+      { name: 'Paper bag',                    cost: 5 },
       { name: 'Pen',                          cost: 3 },
       { name: 'Key holder',                   cost: 10 },
       { name: 'Notebook / jotter',            cost: 25 },
@@ -138,6 +137,20 @@ export const UNIT_JOB_LABELS = {
   souvenir: 'Souvenir branding',
 };
 export const isUnitJob = (jobType) => UNIT_JOB_TYPES.includes(jobType);
+
+// T-shirts: where the print goes. 'both' adds the item's backCost per piece.
+export const PRINT_SIDES = [
+  { value: 'front', label: 'Front only' },
+  { value: 'both',  label: 'Front & back' },
+];
+export const hasPrintSides = (jobType) => jobType === 'tshirt';
+export const printSidesLabel = (v) => (v === 'both' ? 'front & back print' : 'front print');
+
+// Cost per piece of a per-piece item, including the back print when chosen.
+export function unitItemCost(item, jobType, printSides = 'front') {
+  const base = Number(item?.cost) || 0;
+  return hasPrintSides(jobType) && printSides === 'both' ? base + (Number(item?.backCost) || 0) : base;
+}
 
 // Key of a per-piece item's Live Quote image in settings.instant_quoter_thumbnails
 // ("souvenir:Ceramic mug"). Job types use their plain key ("flyer").

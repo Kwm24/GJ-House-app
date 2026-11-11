@@ -28,18 +28,19 @@ import { signOut } from "../lib/auth.js";
 import { useNavigate } from "react-router-dom";
 import {
   Briefcase, FileText, Tag, ArrowLeft, CheckCircle2, Clock, Download,
-  Send, CreditCard, Palette, Printer, Scissors, Package, Truck, Star, Calculator, MapPin } from "lucide-react";
+  Send, CreditCard, Palette, Printer, Scissors, Package, Truck, Star, Calculator, UserRound } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle.jsx";
 import { PeriodPicker, filterByPeriod, defaultPeriod } from "../components/PeriodPicker.jsx";
 import { InstantQuoter, buildInstantQuoteSummary } from "../components/InstantQuoter.jsx";
-import { MyDeliveryLocations, DeliveryLocationPrompt } from "../components/delivery/DeliveryLocations.jsx";
+import { CustomerProfile, ProfilePrompts } from "../components/customer/CustomerProfile.jsx";
 
 // ── Production stages (maps DB status values → customer-friendly labels) ──────
 const STAGES = [
   { key: "sent",             label: "Quote Sent",       Icon: Send         },
   { key: "approved",         label: "Deposit Paid",     Icon: CreditCard   },
-  { key: "ready_for_design", label: "Design in Review", Icon: Palette      },
-  { key: "design_ready",     label: "Design Approved",  Icon: CheckCircle2 },
+  { key: "ready_for_design", label: "Design in Progress",     Icon: Palette      },
+  { key: "design_review",    label: "Review Your Design",     Icon: Palette      },
+  { key: "design_ready",     label: "Design Approved",        Icon: CheckCircle2 },
   { key: "in_production",    label: "In Production",    Icon: Printer      },
   { key: "at_finishing",     label: "At Finishing",     Icon: Scissors     },
   { key: "ready_for_pickup", label: "Ready for Pickup", Icon: Package      },
@@ -52,6 +53,7 @@ const STATUS_BADGE = {
   approved:         "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300",
   in_production:    "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300",
   ready_for_design: "bg-purple-50 text-purple-700 dark:bg-purple-900/20 dark:text-purple-300",
+  design_review:    "bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300",
   design_ready:     "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-300",
   at_finishing:     "bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300",
   ready_for_pickup: "bg-teal-50 text-teal-700 dark:bg-teal-900/20 dark:text-teal-300",
@@ -64,12 +66,20 @@ const STATUS_ACCENT = {
   approved:         "#10B981",
   in_production:    "#F59E0B",
   ready_for_design: "#A855F7",
+  design_review:    "#F59E0B",
   design_ready:     "#6366F1",
   at_finishing:     "#F97316",
   ready_for_pickup: "#14B8A6",
   delivered:        "#22C55E",
   completed:        "#10B981",
 };
+
+// "2026-11-20" → "Fri, 20 Nov 2026" (dates are calendar days, no time zone shift)
+function fmtDay(d) {
+  return new Date(`${String(d).slice(0, 10)}T00:00:00`).toLocaleDateString("en-GH", {
+    weekday: "short", day: "numeric", month: "short", year: "numeric",
+  });
+}
 
 function stageLabel(status) {
   return STAGES.find((s) => s.key === status)?.label ?? status;
@@ -138,14 +148,16 @@ function StatusTab({ job }) {
           <span className="text-[var(--t-muted)]">Reference</span>
           <span className="font-mono font-medium text-[var(--t-text1)]">{job.quote_ref}</span>
         </div>
+        {job.design_due && ["sent", "approved", "ready_for_design"].includes(job.status) && (
+          <div className="flex justify-between gap-3">
+            <span className="text-[var(--t-muted)]">Design ready for review by</span>
+            <span className="font-medium text-[var(--t-text1)] text-right">{fmtDay(job.design_due)}</span>
+          </div>
+        )}
         {job.deadline && (
-          <div className="flex justify-between">
-            <span className="text-[var(--t-muted)]">Deadline</span>
-            <span className="font-medium text-[var(--t-text1)]">
-              {new Date(job.deadline).toLocaleDateString("en-GH", {
-                day: "numeric", month: "short", year: "numeric",
-              })}
-            </span>
+          <div className="flex justify-between gap-3">
+            <span className="text-[var(--t-muted)]">Expected finish</span>
+            <span className="font-medium text-[var(--t-text1)] text-right">{fmtDay(job.deadline)}</span>
           </div>
         )}
         <div className="flex justify-between">
@@ -406,11 +418,14 @@ function FinalDesignTab({ job, onJobUpdate }) {
   const [approving, setApproving] = useState(false);
   // Track approval locally so the UI reacts immediately without waiting for a
   // full re-fetch of all jobs.
-  const [approved,  setApproved]  = useState(job.design_approved || false);
+  // Approved by the customer here, or moved past the design steps by our team
+  // (e.g. the customer approved on WhatsApp and CS set "Design Approved")
+  const pastDesign = !["sent", "approved", "ready_for_design", "design_review"].includes(job.status);
+  const [approved,  setApproved]  = useState(job.design_approved || pastDesign);
 
   useEffect(() => {
     // Reset approval state when the user switches job
-    setApproved(job.design_approved || false);
+    setApproved(job.design_approved || pastDesign);
     setLoading(true);
     listJobFiles(job.id, "design")
       .then(async (items) => {
@@ -425,7 +440,7 @@ function FinalDesignTab({ job, onJobUpdate }) {
       })
       .catch((err) => setError(err.message ?? "Could not load design files."))
       .finally(() => setLoading(false));
-  }, [job.id, job.design_approved]);
+  }, [job.id, job.design_approved, pastDesign]);
 
   async function handleApprove() {
     const confirmed = window.confirm(
@@ -478,6 +493,7 @@ function FinalDesignTab({ job, onJobUpdate }) {
   }
 
   const isImage = (name) => /\.(jpe?g|png|gif|webp|svg)$/i.test(name ?? "");
+  const canApprove = ["design_review", "ready_for_design"].includes(job.status);
 
   return (
     <div className="space-y-4">
@@ -489,6 +505,10 @@ function FinalDesignTab({ job, onJobUpdate }) {
             You have approved this design. Our production team has been notified
             to proceed with printing.
           </p>
+        </div>
+      ) : !canApprove ? (
+        <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3">
+          <p className="text-xs text-gray-600">Our team is still working on this design. We&apos;ll notify you when it&apos;s ready for your approval.</p>
         </div>
       ) : (
         <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex gap-3 items-start">
@@ -537,8 +557,8 @@ function FinalDesignTab({ job, onJobUpdate }) {
         );
       })}
 
-      {/* Approve button — hidden once approved */}
-      {!approved && (
+      {/* Approve button: only while the design is waiting for the customer */}
+      {!approved && canApprove && (
         <button
           type="button"
           onClick={handleApprove}
@@ -1044,7 +1064,8 @@ function CustomerDocumentsView() {
 
 // ── Job detail (tabbed view) ───────────────────────────────────────────────────
 function JobDetail({ job, onBack, onJobUpdate }) {
-  const [tab, setTab] = useState("status");
+  // A design waiting for approval opens straight on the design
+  const [tab, setTab] = useState(job.status === "design_review" ? "design" : "status");
   const tabs = [
     { key: "status",    label: "Status",           Icon: CheckCircle2 },
     { key: "documents", label: "Documents",        Icon: FileText     },
@@ -1134,13 +1155,17 @@ function JobCard({ job, onClick }) {
           {job.job_title || "Print Job"}
         </p>
 
-        {/* Deadline */}
+        {/* Finishing dates */}
+        {job.design_due && ["sent", "approved", "ready_for_design"].includes(job.status) && (
+          <div className="flex items-center gap-1.5 text-xs text-[var(--t-muted)]">
+            <Palette size={11} aria-hidden="true" />
+            <span>Design ready by {fmtDay(job.design_due)}</span>
+          </div>
+        )}
         {job.deadline && (
           <div className="flex items-center gap-1.5 text-xs text-[var(--t-muted)]">
-            <Clock size={11} />
-            <span>{new Date(job.deadline).toLocaleDateString("en-GH", {
-              day: "numeric", month: "short", year: "numeric",
-            })}</span>
+            <Clock size={11} aria-hidden="true" />
+            <span>Expected finish {fmtDay(job.deadline)}</span>
           </div>
         )}
 
@@ -1148,6 +1173,11 @@ function JobCard({ job, onClick }) {
         {job.status === "ready_for_design" && !job.design_approved && (
           <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 px-2.5 py-1.5">
             <p className="text-[11px] text-purple-700 dark:text-purple-300 font-semibold">Design work in progress</p>
+          </div>
+        )}
+        {job.status === "design_review" && !job.design_approved && (
+          <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-2.5 py-1.5">
+            <p className="text-[11px] text-amber-800 dark:text-amber-300 font-semibold">Your design is ready. Open the job to review and approve it</p>
           </div>
         )}
 
@@ -1213,8 +1243,18 @@ export function CustomerPage() {
     setJobs((prev) => prev.map((j) => j.id === updatedJob.id ? { ...j, ...updatedJob } : j));
   }
 
-  // When entering a job detail, stay in the "jobs" section
-  function handleSelectJob(id) { setSelectedId(id); setSection("jobs"); }
+  // Profile page (header button). `focus` scrolls to a section, e.g. "delivery".
+  const [profileFocus, setProfileFocus] = useState(null);
+  function openProfile(focus = null) {
+    setSelectedId(null);
+    setProfileFocus(focus);
+    setSection("profile");
+    window.scrollTo({ top: 0 });
+  }
+
+  // When entering a job detail, stay in the "jobs" section. Re-fetch so the
+  // job shows its latest status / files even if a live update was missed.
+  function handleSelectJob(id) { setSelectedId(id); setSection("jobs"); load(); }
 
   async function handleSignOut() {
     await signOut().catch(() => {});
@@ -1225,7 +1265,6 @@ export function CustomerPage() {
     { key: "jobs",      label: "My Jobs",      Icon: Briefcase  },
     { key: "quoter",    label: "Get a Price",  Icon: Calculator },
     { key: "documents", label: "My Documents", Icon: FileText   },
-    { key: "delivery",  label: "Delivery",     Icon: MapPin     },
     { key: "rates",     label: "Rates",        Icon: Tag        },
   ];
 
@@ -1243,7 +1282,22 @@ export function CustomerPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <NotificationBell onJobClick={(jobId) => { setSelectedId(jobId); setSection("jobs"); }} />
+            <NotificationBell onJobClick={(jobId) => { handleSelectJob(jobId); }} />
+            <button
+              type="button"
+              onClick={() => openProfile()}
+              aria-label="Your profile"
+              aria-current={section === "profile" ? "page" : undefined}
+              title="Your profile"
+              className={[
+                "flex h-8 w-8 items-center justify-center rounded-full border transition-colors",
+                section === "profile"
+                  ? "border-transparent bg-brand-red text-white"
+                  : "border-[var(--t-border)] text-[var(--t-text2)] hover:text-[var(--t-text1)]",
+              ].join(" ")}
+            >
+              <UserRound size={15} />
+            </button>
             <ThemeToggle />
             <button
               type="button"
@@ -1292,6 +1346,7 @@ export function CustomerPage() {
         {selectedJob ? (
           <div className="bg-[var(--t-surface)] rounded-2xl border border-[var(--t-border)] p-5 sm:p-6">
             <JobDetail
+              key={selectedJob.id}
               job={selectedJob}
               onBack={() => setSelectedId(null)}
               onJobUpdate={handleJobUpdate}
@@ -1309,7 +1364,7 @@ export function CustomerPage() {
               )}
             </div>
 
-            <DeliveryLocationPrompt onAdd={() => setSection("delivery")} accent={accentHex} />
+            <ProfilePrompts onOpenProfile={openProfile} accent={accentHex} />
 
             {/* Period filter */}
             <div className="mb-4">
@@ -1387,17 +1442,10 @@ export function CustomerPage() {
               )}
             </div>
           </>
-        ) : section === "delivery" ? (
-          /* ── Delivery locations ── */
-          <>
-            <div className="mb-5">
-              <h2 className="text-base font-bold text-[var(--t-text1)]">Delivery Location</h2>
-              <p className="text-xs text-[var(--t-muted)] mt-0.5">
-                Where should we deliver your orders? Your pin is shared with our delivery rider.
-              </p>
-            </div>
-            <MyDeliveryLocations accent={accentHex} defaultPhone={profile?.phone || ""} />
-          </>
+        ) : section === "profile" ? (
+          /* ── Profile (header button) ── */
+          <CustomerProfile onBack={() => setSection("jobs")} accent={accentHex}
+            whatsappNumber={whatsappNumber} focus={profileFocus} />
         ) : section === "documents" ? (
           /* ── Documents section ── */
           <>

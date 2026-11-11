@@ -12,6 +12,7 @@ import {
   LAMINATION_NONE, laminationOptions, laminationCost,
   DIGITAL_SIZES, digitalSizeLabel,
   isUnitJob, unitItems, unitThumbKey, mergeDigitalRates,
+  PRINT_SIDES, hasPrintSides, printSidesLabel, unitItemCost,
 } from "../lib/digitalPrintSpecs.js";
 import { UNIT_TO_M, UNIT_KEYS, convertLength, fmtDims } from "../lib/units.js";
 import { DimensionInput, UnitSelect } from "./DimensionInput.jsx";
@@ -82,7 +83,7 @@ function cheapestSheet(w, h, pieces, duplex, stock, rates) {
 }
 
 // ── Build a WhatsApp-ready order summary from a result snapshot ───────────────
-export function buildInstantQuoteSummary({ jobType, jobLabel, size, qty, paper, duplex, pages, bindType, coverStock, covDuplex, lamination, area, areaUnit, mat, unitItem, total, perUnit }) {
+export function buildInstantQuoteSummary({ jobType, jobLabel, size, qty, paper, duplex, pages, bindType, coverStock, covDuplex, lamination, area, areaUnit, mat, unitItem, printSides, total, perUnit }) {
   const GHSfmt = (n) => "GH₵ " + Number(n).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (unitItem) {
     return [
@@ -90,6 +91,7 @@ export function buildInstantQuoteSummary({ jobType, jobLabel, size, qty, paper, 
       "",
       `Product: ${jobLabel}`,
       `Item: ${unitItem}`,
+      ...(printSides ? [`Printing: ${printSides === "both" ? "Front & back" : "Front only"}`] : []),
       `Quantity: ${qty.toLocaleString()} piece(s)`,
       "",
       `Estimated total: ${GHSfmt(total)}`,
@@ -183,6 +185,7 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
 
   // Per-piece products (roll-up banners, T-shirts, souvenirs)
   const [unitItem, setUnitItem] = useState('');
+  const [printSides, setPrintSides] = useState('front');   // T-shirts: front only / front & back
 
   // Changing the banner/sticker unit converts the typed size (20cm → 0.2m)
   function changeLfUnit(next) {
@@ -207,6 +210,7 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
     setDuplex(pre.duplex);
     setQty(pre.qty);
     setUnitItem('');
+    setPrintSides('front');
     if (type === 'banner') { setLfWidth(6); setLfUnit('ft'); }
     if (type === 'sticker') { setLfWidth(10); setLfHeight(10); setLfUnit('cm'); }
   }
@@ -235,13 +239,14 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
   const itemList   = isUnit ? unitItems(rates, jobType) : [];
   const activeItem = itemList.find((i) => i.name === unitItem) || itemList[0] || null;
   const unitMarkup = rates.unitMarkup ?? rates.markup ?? 0;
-  const unitSell   = (item) => (Number(item?.cost) || 0) * (1 + unitMarkup / 100);
+  const sidesOn    = hasPrintSides(jobType);
+  const unitSell   = (item) => unitItemCost(item, jobType, printSides) * (1 + unitMarkup / 100);
 
   const result = useMemo(() => {
     if (isUnit) {
       const sell = unitSell(activeItem) * qty;
       if (!sell) return null;
-      return { total: sell, perUnit: qty > 0 ? sell / qty : sell, qty, item: activeItem.name };
+      return { total: sell, perUnit: qty > 0 ? sell / qty : sell, qty, item: activeItem.name, printSides: sidesOn ? printSides : null };
     }
     if (isLF) {
       const matRates = rates.lf[jobType] || {};
@@ -296,14 +301,14 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
       sheet:   best.name,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isUnit, activeItem, unitMarkup, isLF, jobType, dims, qty, leavesPerCopy, duplex, stock, isBook, isFold, bindType, spine, coverStock, covDuplex, lamination, activeMat, lfWidth, lfHeight, lfUnit, rates]);
+  }, [isUnit, activeItem, unitMarkup, printSides, isLF, jobType, dims, qty, leavesPerCopy, duplex, stock, isBook, isFold, bindType, spine, coverStock, covDuplex, lamination, activeMat, lfWidth, lfHeight, lfUnit, rates]);
 
   // Notify parent whenever the result or key config changes
   useEffect(() => {
     if (!onResult) return;
     if (!result) { onResult(null); return; }
     if (isUnit) {
-      onResult({ jobType, jobLabel, unitItem: result.item, qty, size: result.item, total: result.total, perUnit: result.perUnit });
+      onResult({ jobType, jobLabel, unitItem: result.item, printSides: result.printSides, qty, size: result.item, total: result.total, perUnit: result.perUnit });
       return;
     }
     const size = isLF
@@ -350,7 +355,7 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
   const jobLabel = JOB_TYPES.find((t) => t.value === jobType)?.label || jobType;
   const pieces = (n) => `${n.toLocaleString()} piece${n !== 1 ? 's' : ''}`;
   const sizeSummary = isUnit
-    ? [activeItem?.name, pieces(qty)].filter(Boolean).join(' · ')
+    ? [activeItem?.name, sidesOn ? printSidesLabel(printSides) : null, pieces(qty)].filter(Boolean).join(' · ')
     : isLF
     ? `${lfWidth}${lfUnit} × ${lfHeight}${lfUnit} · ${qty.toLocaleString()} piece${qty !== 1 ? 's' : ''}`
     : [
@@ -481,6 +486,13 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
               ) : (
                 <p className="text-sm text-[var(--t-muted)]">Contact us for a price on this product.</p>
               )}
+              {itemList.length > 0 && sidesOn && (
+                <div className="sm:max-w-sm">
+                  <label className={lbl}>Where should we print?</label>
+                  <ChoiceRow value={printSides} onChange={setPrintSides} accent={accent}
+                    options={PRINT_SIDES.map((p) => [p.value, p.label])} />
+                </div>
+              )}
               <div className="sm:max-w-[200px]">
                 <label className={lbl}>Quantity (pieces)</label>
                 <input type="number" min="1" className={inp} value={qty}
@@ -488,20 +500,21 @@ export function InstantQuoter({ accentHex = "#C0392B", onResult, whatsappNumber 
               </div>
             </div>
           ) : !isLF ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_9rem] gap-4">
+              {/* Size gets the wide column so preset names like "A5 (148mm × 210mm)" fit; quantity stays narrow */}
+              <div className="min-w-0">
                 <label className={lbl}>{isBook ? 'Page size' : isFold ? 'Flat (open) size' : 'Finished size'}</label>
                 <div className="flex gap-2">
-                  <select className={inp} value={sizeKey} onChange={(e) => setSizeKey(e.target.value)}>
+                  <select className={inp + " min-w-0 flex-1"} value={sizeKey} onChange={(e) => setSizeKey(e.target.value)}>
                     {Object.keys(SIZES).map((k) => <option key={k} value={k}>{digitalSizeLabel(k, dimUnit)}</option>)}
                   </select>
                   <UnitSelect value={dimUnit} onChange={setDimUnit} ariaLabel="Size unit"
-                    className={inp + " !w-auto shrink-0"} />
+                    className={inp + " !w-[5.5rem] shrink-0 !px-2"} />
                 </div>
               </div>
               <div>
                 <label className={lbl}>Quantity ({isBook ? 'books' : 'copies'})</label>
-                <input type="number" min="1" className={inp} value={qty}
+                <input type="number" min="1" inputMode="numeric" className={inp} value={qty}
                   onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} />
               </div>
               {sizeKey === 'Custom' && (

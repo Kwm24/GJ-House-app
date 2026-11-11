@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../AuthProvider.jsx";
-import { listPayments, createPayment, deletePayment, PAYMENT_METHODS, PAYMENT_TYPES } from "../../lib/payments.js";
+import { listPayments, createPayment, deletePayment, sumPaymentsForJob, PAYMENT_METHODS, PAYMENT_TYPES } from "../../lib/payments.js";
 import { listJobsForPicker, jobGrandTotal, createJobFromInvoice, jobTotalPaid } from "../../lib/jobs.js";
 import { listInvoices, saveInvoice, genInvoiceRef } from "../../lib/invoices.js";
 import { subscribeToTable } from "../../lib/realtime.js";
@@ -206,9 +206,15 @@ export function PaymentsTab() {
       listInvoices(),
     ]).then(([jobs, invoices]) => {
       setJobOptions(jobs);
-      // Only show open (unsettled) invoices — exclude already-paid or cancelled ones
+      // Only open (unsettled) quotes / invoices. Receipts are never payable, and a
+      // quotation that was converted to an invoice is paid through that invoice
+      // (paying both would create two jobs for one order).
+      const converted = new Set(invoices.map((inv) => inv.source_ref).filter(Boolean));
       setInvoiceOptions(
-        invoices.filter((inv) => inv.status !== "paid" && inv.status !== "cancelled")
+        invoices.filter((inv) =>
+          inv.status !== "paid" && inv.status !== "cancelled" &&
+          inv.type !== "receipt" &&
+          !(inv.type === "quote" && converted.has(inv.ref)))
       );
     }).catch(() => {});
   }, [mode]);
@@ -264,6 +270,7 @@ export function PaymentsTab() {
         const jobTitle = selectedInvoice.line_items?.[0]?.name || "Print Job";
         const job = await createJobFromInvoice(user.id, {
           ref:           selectedInvoice.ref,
+          sourceRef:     selectedInvoice.source_ref || null,   // the quotation it was converted from
           clientName:    selectedInvoice.client_name    || "",
           clientPhone:   selectedInvoice.client_phone   || null,
           jobTitle,
@@ -276,8 +283,6 @@ export function PaymentsTab() {
         });
         resolvedJobId = job.id;
 
-        // ── Step 2: Mark the original invoice as paid ─────────────────────────
-        await saveInvoice({ status: "paid" }, selectedInvoice.id);
 
         // ── Step 3: Create a receipt for the customer portal ──────────────────
         // Runs whenever we have a customer link — either from the original invoice
@@ -314,6 +319,16 @@ export function PaymentsTab() {
         date,
         recordedBy: user.id,
       });
+
+      // ── Step 5: Mark the invoice paid once it's fully settled ─────────────
+      // A deposit leaves it open, so the balance is recorded against the same
+      // invoice (and the same job) instead of another document.
+      if (selectedInvoice && resolvedJobId) {
+        const received = await sumPaymentsForJob(resolvedJobId);
+        if (received + 0.005 >= Number(selectedInvoice.total || 0)) {
+          await saveInvoice({ status: "paid" }, selectedInvoice.id);
+        }
+      }
 
       resetForm();
       setMode("list");

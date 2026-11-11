@@ -99,6 +99,8 @@ export function InvoicesTab({ focusInvoiceId, onFocusConsumed }) {
       type: "invoice",
       status: "draft",
       ref: genInvoiceRef("invoice"),
+      // Payments on the invoice then find the job of the quotation (one job per order)
+      source_ref: inv.ref,
     });
     setMode("create");
   }

@@ -1,4 +1,5 @@
 import { buildWhatsAppChatUrl } from "../../lib/jobNotify.js";
+import { openCustomerWhatsApp } from "../../lib/customerProfile.js";
 import { formatGHS } from "../../lib/currency.js";
 import { ChevronRight, MessageCircle } from "lucide-react";
 
@@ -7,6 +8,7 @@ const STATUS_STYLE = {
   sent:             { border: "#3B82F6", badge: "bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300"    },
   approved:         { border: "#10B981", badge: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20"               },
   ready_for_design: { border: "#A855F7", badge: "bg-purple-50 text-purple-700 dark:bg-purple-900/20"                  },
+  design_review:    { border: "#F59E0B", badge: "bg-amber-50 text-amber-800 dark:bg-amber-900/20"                   },
   design_ready:     { border: "#6366F1", badge: "bg-indigo-50 text-[#6366F1] dark:bg-indigo-900/20"                   },
   in_production:    { border: "#F59E0B", badge: "bg-amber-50 text-amber-700 dark:bg-amber-900/20"                     },
   at_finishing:     { border: "#F97316", badge: "bg-orange-50 text-orange-700 dark:bg-orange-900/20"                  },
@@ -74,13 +76,13 @@ export function JobCard({ job, designCost, onClick, assignmentSlot }) {
       )}
 
       {/* WhatsApp link */}
-      {job.client_phone && (
+      {(job.client_phone || job.customer_id) && (
         <div className="px-4 pb-3">
           <a
             href={buildWhatsAppChatUrl(job.client_phone)}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); e.preventDefault(); openCustomerWhatsApp(job); }}
             className="flex items-center justify-center gap-1.5 rounded-lg bg-[#25D366] text-white text-xs font-medium py-1.5 hover:bg-[#1ebe5a] transition-colors"
           >
             <MessageCircle size={12} />

@@ -238,6 +238,7 @@ export function JobDetail({ jobId, onBack }) {
               disabled={deadlineSaving}
               className="w-full rounded-lg border border-[var(--t-border)] bg-[var(--t-bg)] px-3 py-2.5 text-sm text-[var(--t-text1)] focus:outline-none focus:ring-2 focus:ring-brand-red/40 focus:border-brand-red disabled:opacity-60"
             />
+            <p className="mt-1 text-[11px] text-[var(--t-muted)]">The customer sees this as the expected finish date and is notified when it changes.</p>
           </div>
         </div>
       </div>
