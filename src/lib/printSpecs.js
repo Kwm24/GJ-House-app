@@ -9,11 +9,68 @@ export const PARENT_SHEETS = {
 };
 
 export const BOOK_SIZES = {
+  A6: { w: 105 / 25.4, h: 148 / 25.4, label: 'A6 (105mm × 148mm)' },
+  DL: { w: 99 / 25.4,  h: 210 / 25.4, label: 'DL (99mm × 210mm)' },
   A5: { w: 148 / 25.4, h: 210 / 25.4, label: 'A5 (148mm × 210mm)' },   // exact ISO size, stored in inches
   A4: { w: 210 / 25.4, h: 297 / 25.4, label: 'A4 (210mm × 297mm)' },
   A3: { w: 297 / 25.4, h: 420 / 25.4, label: 'A3 (297mm × 420mm)' },
+  A2: { w: 420 / 25.4, h: 594 / 25.4, label: 'A2 (420mm × 594mm)' },
   Custom: { w: 0, h: 0, label: "Custom" },
 };
+
+// ── Single-sheet work ("sheetwork") ─────────────────────────────────────────
+// Flyers, brochures, posters, calendars…: each copy is one or more flat
+// leaves, imposed n-up on the parent sheet (not as book signatures).
+// job.workType: "book" (default; older quotes have none) | "sheet"
+export const isSheetWork = (job) => job?.workType === "sheet";
+
+// Presets: size key (BOOK_SIZES), printed sides, leaves per copy, folding, binding
+export const SHEET_PRODUCTS = [
+  { value: "flyer",      label: "Flyer / Leaflet",       size: "A5", sides: "double", leaves: 1,  folded: false, binding: "none" },
+  { value: "brochure",   label: "Brochure (folded)",     size: "A4", sides: "double", leaves: 1,  folded: true,  binding: "none" },
+  { value: "poster",     label: "Poster",                size: "A2", sides: "single", leaves: 1,  folded: false, binding: "none" },
+  { value: "calendar",   label: "Wall calendar",         size: "A3", sides: "single", leaves: 13, folded: false, binding: "spiral" },
+  { value: "letterhead", label: "Letterhead",            size: "A4", sides: "single", leaves: 1,  folded: false, binding: "none" },
+  { value: "card",       label: "Card / Invitation",     size: "A6", sides: "double", leaves: 1,  folded: false, binding: "none" },
+  { value: "other",      label: "Other single sheet",    size: "A4", sides: "single", leaves: 1,  folded: false, binding: "none" },
+];
+
+export function sheetProductLabel(value) {
+  return SHEET_PRODUCTS.find((p) => p.value === value)?.label || "Single sheet";
+}
+
+export function coloursLabel(colours) {
+  return colours === "1" ? "1 colour" : colours === "4" ? "Full colour" : `${colours || "—"} colours`;
+}
+
+// One-line description of an offset job (quote summary, invoice line,
+// cost breakdown). `sheetLabel` is the parent sheet already formatted.
+export function offsetJobSummary(job = {}, unit = "in", sheetLabel = "") {
+  const lam  = LAM_TYPES.find((l) => l.value === job.laminationType);
+  const bind = BINDING_TYPES.find((b) => b.value === (isSheetWork(job) ? job.sheetBinding : job.bindingType));
+  if (isSheetWork(job)) {
+    const leaves = Math.max(1, parseInt(job.leaves) || 1);
+    return [
+      sheetProductLabel(job.sheetProduct),
+      coloursLabel(job.colours),
+      job.printSides === "double" ? "Double-sided" : "Single-sided",
+      offsetBookLabel(job, unit),
+      leaves > 1 ? `${leaves} leaves per copy` : null,
+      sheetLabel || null,
+      job.folded ? "Folded" : null,
+      lam && lam.value !== "none" ? `${lam.label} lamination` : null,
+      bind ? bind.label : null,
+    ].filter(Boolean).join(" · ");
+  }
+  return [
+    `${job.numPages} pages`,
+    coloursLabel(job.colours),
+    offsetBookLabel(job, unit),
+    sheetLabel || null,
+    bind?.label || null,
+    job.hasCover ? `Cover: ${lam && lam.value !== "none" ? lam.label : "No lam."}` : null,
+  ].filter(Boolean).join(" · ");
+}
 
 // Offset sizes are stored in inches. These helpers show them in any unit:
 // offsetBookLabel(job, "mm") → "A5 (148.1mm × 210.1mm)" / "Custom (150mm × 200mm)"

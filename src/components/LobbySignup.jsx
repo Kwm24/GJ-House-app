@@ -47,8 +47,6 @@ export function LobbySignup({ icon, title, subtitle, role, loginPath }) {
   const pageWrap = (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12"
       style={{ background: "linear-gradient(135deg, #1C1C1E 0%, #111113 60%, #1a1020 100%)" }}>
-      <div className="pointer-events-none absolute inset-0 opacity-[0.04]" aria-hidden="true"
-        style={{ backgroundImage: "radial-gradient(circle, #fff 1px, transparent 1px)", backgroundSize: "28px 28px" }} />
     </div>
   );
 
@@ -60,7 +58,7 @@ export function LobbySignup({ icon, title, subtitle, role, loginPath }) {
         <LoginBackdrop />
         <div className="pointer-events-none absolute inset-0 opacity-[0.04]" aria-hidden="true"
           style={{ backgroundImage: "radial-gradient(circle, #fff 1px, transparent 1px)", backgroundSize: "28px 28px" }} />
-        <div className="relative w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl text-center"
+        <div className="relative w-full max-w-md rounded-2xl bg-white/85 backdrop-blur-md backdrop-saturate-150 border border-white/50 p-8 shadow-2xl text-center"
           style={{ boxShadow: "0 24px 64px rgba(0,0,0,0.4)" }}>
           <div className="text-4xl mb-4">🎉</div>
           <h2 className="font-display text-xl font-bold text-genesis-text1">Account created!</h2>
@@ -90,8 +88,6 @@ export function LobbySignup({ icon, title, subtitle, role, loginPath }) {
 
       <LoginBackdrop />
 
-      <div className="pointer-events-none absolute inset-0 opacity-[0.04]" aria-hidden="true"
-        style={{ backgroundImage: "radial-gradient(circle, #fff 1px, transparent 1px)", backgroundSize: "28px 28px" }} />
 
       {/* Brand mark */}
       <div className="relative w-full max-w-md text-center mb-8">
@@ -110,7 +106,7 @@ export function LobbySignup({ icon, title, subtitle, role, loginPath }) {
       {/* Form card */}
       <form
         onSubmit={handleSubmit}
-        className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl p-6 sm:p-8 space-y-4"
+        className="relative w-full max-w-md rounded-2xl bg-white/85 backdrop-blur-md backdrop-saturate-150 border border-white/50 shadow-2xl p-6 sm:p-8 space-y-4"
         style={{ boxShadow: "0 24px 64px rgba(0,0,0,0.4)" }}
       >
         <div>

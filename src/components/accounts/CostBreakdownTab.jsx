@@ -13,7 +13,7 @@ import { listAllExpenditures } from "../../lib/expenditures.js";
 import { listInvoiceTotalsByRefs } from "../../lib/invoices.js";
 import { jobCostSummary, digitalSnapshotRates } from "../../lib/costBreakdown.js";
 import { computeDigitalQuote } from "../../lib/digitalQuoteCalc.js";
-import { PARENT_SHEETS, LAM_TYPES, BINDING_TYPES, offsetBookLabel, offsetSheetLabel } from "../../lib/printSpecs.js";
+import { PARENT_SHEETS, offsetSheetLabel, offsetJobSummary } from "../../lib/printSpecs.js";
 import { jobStatusLabel } from "../../lib/jobStatus.js";
 import { formatGHS } from "../../lib/currency.js";
 import { exportToCsv } from "../../lib/csvExport.js";
@@ -70,10 +70,7 @@ function OffsetSection({ q }) {
         <div style={{ fontSize: 15, fontWeight: 700, color: "#1C1C1E" }}>{snap.jobTitle || q.name || "—"}</div>
         <div style={{ fontSize: 11, color: "#666", marginTop: 3 }}>
           {snap.clientName && <span>Client: <b>{snap.clientName}</b> &middot; </span>}
-          {job.numPages} pages &middot; {job.colours === "1" ? "1 colour" : job.colours === "4" ? "Full colour" : "2 colours"} &middot;{" "}
-          {offsetBookLabel(job, unit)}{sheet && <> &middot; {offsetSheetLabel(sheet, unit)}</>} &middot;{" "}
-          {BINDING_TYPES.find((b) => b.value === job.bindingType)?.label}
-          {job.hasCover && ` · Cover: ${LAM_TYPES.find((l) => l.value === job.laminationType)?.label || "No lam."}`}
+          {offsetJobSummary(job, unit, sheet ? offsetSheetLabel(sheet, unit) : "")}
         </div>
         <div style={{ fontSize: 11, color: "#888", marginTop: 3 }}>Ref: <b>{snap.ref}</b>{snap.date ? ` · ${snap.date}` : ""}</div>
       </div>

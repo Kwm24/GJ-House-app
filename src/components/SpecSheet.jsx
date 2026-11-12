@@ -1,4 +1,4 @@
-import { PARENT_SHEETS, LAM_TYPES, BINDING_TYPES, offsetBookLabel, offsetSheetLabel } from "../lib/printSpecs.js";
+import { PARENT_SHEETS, LAM_TYPES, BINDING_TYPES, offsetBookLabel, offsetSheetLabel, isSheetWork, sheetProductLabel } from "../lib/printSpecs.js";
 import { digitalJobSizeLabel } from "../lib/digitalPrintSpecs.js";
 
 function SpecTile({ icon, label, value, sub }) {
@@ -238,7 +238,12 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
   const parentSheetLabel = specJob.parentSheet === "custom"
     ? offsetSheetLabel({ w: specJob.customSheetW, h: specJob.customSheetH, label: "Custom" }, specUnit)
     : PARENT_SHEETS[specJob.parentSheet] ? offsetSheetLabel(PARENT_SHEETS[specJob.parentSheet], specUnit) : "—";
-  const bindingLabel     = BINDING_TYPES.find((b) => b.value === specJob.bindingType)?.label ?? "—";
+  const sheetWork        = isSheetWork(specJob);   // flyers, posters, calendars…
+  const leaves           = Math.max(1, parseInt(specJob.leaves) || 1);
+  const sidesLabel       = specJob.printSides === "double" ? "Double-sided" : "Single-sided";
+  const bindingLabel     = sheetWork
+    ? (BINDING_TYPES.find((b) => b.value === specJob.sheetBinding)?.label ?? "None")
+    : (BINDING_TYPES.find((b) => b.value === specJob.bindingType)?.label ?? "—");
   const lamLabel         = LAM_TYPES.find((l) => l.value === specJob.laminationType)?.label ?? "—";
   const coloursLabel     = specJob.colours === "1" ? "1 colour"
     : specJob.colours === "4" ? "Full colour"
@@ -253,7 +258,9 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
         </h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <SpecTile icon="📐" label="Finished size"   value={bookSizeLabel} />
-          <SpecTile icon="📖" label="Pages"           value={specJob.numPages ?? "—"} />
+          {sheetWork
+            ? <SpecTile icon="📄" label={sheetProductLabel(specJob.sheetProduct)} value={sidesLabel} sub={leaves > 1 ? `${leaves} leaves per copy` : null} />
+            : <SpecTile icon="📖" label="Pages"           value={specJob.numPages ?? "—"} />}
           <SpecTile icon="🎨" label="Colours"         value={coloursLabel} />
           <SpecTile icon="📚" label="Binding"         value={bindingLabel} />
         </div>
@@ -263,6 +270,8 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
 
   const plateSub = specJob.useManualPlates
     ? "entered manually"
+    : sheetWork
+    ? `${leaves > 1 ? `${leaves} leaves × ` : ""}${specJob.printSides === "double" ? 2 : 1} side(s) × ${specJob.colours} colour${specJob.colours > 1 ? "s" : ""}`
     : r.paper?.pagesPerSheet
     ? `${Math.ceil(specJob.numPages / r.paper.pagesPerSheet)} forms × 2 sides × ${specJob.colours} colour${specJob.colours > 1 ? "s" : ""}`
     : null;
@@ -285,15 +294,17 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
       {/* Job meta */}
       <dl className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-sm">
         <div>
-          <dt className="text-xs text-[var(--t-muted)]">Pages</dt>
-          <dd className="font-medium text-[var(--t-text1)]">{specJob.numPages ?? "—"}</dd>
+          <dt className="text-xs text-[var(--t-muted)]">{sheetWork ? "Product" : "Pages"}</dt>
+          <dd className="font-medium text-[var(--t-text1)]">
+            {sheetWork ? `${sheetProductLabel(specJob.sheetProduct)} · ${sidesLabel}${leaves > 1 ? ` · ${leaves} leaves` : ""}` : (specJob.numPages ?? "—")}
+          </dd>
         </div>
         <div>
           <dt className="text-xs text-[var(--t-muted)]">Colours</dt>
           <dd className="font-medium text-[var(--t-text1)]">{coloursLabel}</dd>
         </div>
         <div>
-          <dt className="text-xs text-[var(--t-muted)]">Book size</dt>
+          <dt className="text-xs text-[var(--t-muted)]">{sheetWork ? "Finished size" : "Book size"}</dt>
           <dd className="font-medium text-[var(--t-text1)]">{bookSizeLabel}</dd>
         </div>
         <div>
@@ -309,7 +320,9 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
           icon="📄"
           label="Paper"
           value={r.paper?.reamsNeeded ? `${r.paper.reamsNeeded} reams` : "—"}
-          sub={r.paper ? `${r.paper.sheetsPerCopy} sheets/copy · ${r.paper.pagesPerSheet} pages/sheet` : null}
+          sub={r.paper ? (sheetWork
+            ? `${r.paper.up} per sheet · ${r.paper.totalSheets?.toLocaleString?.() ?? "—"} sheets`
+            : `${r.paper.sheetsPerCopy} sheets/copy · ${r.paper.pagesPerSheet} pages/sheet`) : null}
         />
         <SpecTile icon="🖨️" label="Impressions" value={r.impressions ?? "—"} sub="press runs" />
         <SpecTile icon="📚" label="Binding" value={bindingLabel} />
@@ -329,7 +342,14 @@ export function SpecSheet({ job, invoiceLineItems, variant }) {
             />
           </>
         )}
-        <SpecTile icon="🗂️" label="Fold & Collate" value="✓" sub="per copy" />
+        {sheetWork ? (
+          <>
+            {specJob.laminationType && specJob.laminationType !== "none" && <SpecTile icon="✨" label="Lamination" value={lamLabel} />}
+            {specJob.folded && <SpecTile icon="🗂️" label="Folding" value="✓" sub="per copy" />}
+          </>
+        ) : (
+          <SpecTile icon="🗂️" label="Fold & Collate" value="✓" sub="per copy" />
+        )}
       </div>
     </div>
   );

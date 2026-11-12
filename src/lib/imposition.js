@@ -103,6 +103,28 @@ export function fitOnSheet(bookW, bookH, parentW, parentH, layoutSettings = DEFA
   };
 }
 
+// ─── FLAT (SHEETWORK) FIT ────────────────────────────────────────────────────
+// How many flat pieces (flyers, posters, calendar leaves…) fit on one side of
+// a sheet: a simple grid with a trim gutter between pieces, trying the piece
+// both ways round and keeping whichever fits more.
+export function fitFlatOnSheet(itemW, itemH, parentW, parentH, layoutSettings = DEFAULT_LAYOUT_SETTINGS) {
+  if (!itemW || !itemH || itemW <= 0 || itemH <= 0 || !parentW || !parentH) return null;
+  const { sheetMargin, pairGutter } = layoutSettings || DEFAULT_LAYOUT_SETTINGS;
+  const usableW = parentW - 2 * sheetMargin;
+  const usableH = parentH - 2 * sheetMargin;
+  if (usableW <= 0 || usableH <= 0) return null;
+  const grid = (w, h) => {
+    const across = Math.max(0, Math.floor((usableW + pairGutter) / (w + pairGutter)));
+    const down   = Math.max(0, Math.floor((usableH + pairGutter) / (h + pairGutter)));
+    return { across, down, up: across * down, cellW: w, cellH: h };
+  };
+  const normal  = grid(itemW, itemH);
+  const rotated = grid(itemH, itemW);
+  const best = rotated.up > normal.up ? { ...rotated, rotated: true } : { ...normal, rotated: false };
+  if (best.up < 1) return null;
+  return { ...best, sheetMargin, pairGutter };
+}
+
 // ─── EVALUATE ONE CANDIDATE PARENT SHEET ─────────────────────────────────────
 // Mirrors PrintQuoteGH's calcPaper/calcQuote math exactly, so numbers line up
 // once a sheet is chosen and fed back into the main quote.

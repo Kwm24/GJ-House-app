@@ -10,7 +10,7 @@
 import { useCallback } from "react";
 import { useCellSelection } from "../../lib/useCellSelection.js";
 import { CellSumBar } from "../accounts/CellSumBar.jsx";
-import { LAM_TYPES, BINDING_TYPES } from "../../lib/printSpecs.js";
+import { LAM_TYPES, BINDING_TYPES, isSheetWork } from "../../lib/printSpecs.js";
 import { formatGHS as GHS } from "../../lib/currency.js";
 
 // Print-critical inline styles (the quote is also printed / saved as PDF)
@@ -34,7 +34,7 @@ export function CostBar({ r, qty }) {
     { label: "Plates",      val: r.plateCost,                              color: "#6366F1" },
     { label: "Paper",       val: r.paperCost,                              color: "#E67E22" },
     { label: "Impressions", val: r.impressionCost,                         color: "#2980B9" },
-    { label: "Post-press",  val: (r.trimCost || 0) + r.foldCost + r.bindingCost, color: "#27AE60" },
+    { label: "Post-press",  val: (r.trimCost || 0) + r.foldCost + r.bindingCost + (r.lamCost || 0), color: "#27AE60" },
     { label: "Cover",       val: r.coverPlateCost + r.coverPaperCost + r.coverLamCost + (r.coverImpressionCost || 0), color: "#8E44AD" },
     { label: "Margin",      val: r.margin,                                 color: "#7F8C8D" },
     { label: "VAT",         val: r.vatAmt,                                 color: "#BDC3C7" },
@@ -63,8 +63,30 @@ export function CostBar({ r, qty }) {
   );
 }
 
+// Sheetwork (flyers, posters, calendars…): n-up plates/paper, then finishing
+function sheetRows(job) {
+  const lam  = LAM_TYPES.find(l => l.value === job.laminationType);
+  const bind = BINDING_TYPES.find(b => b.value === job.sheetBinding);
+  const rows = [
+    { key: "plates", cls: "spec-row", get: (r) => r?.plateCost,
+      label: (R, Q) => <>Sepos &amp; Plates <span style={S.pill("#555")}>{R[Q[0]]?.numPlates} plates</span></> },
+    { key: "paper", cls: "spec-row", get: (r) => r?.paperCost,
+      label: (R, Q) => <>Paper <span style={{ ...S.pill("#E67E22"), marginRight: 3 }}>{R[Q[0]]?.paper?.up}-up</span>{Q.map(q => <span key={q} style={{ ...S.pill("#E67E22"), marginRight: 3 }}>{R[q]?.paper?.reamsNeeded} rms</span>)}</> },
+    { key: "impr", cls: "spec-row", get: (r) => r?.impressionCost,
+      label: (R, Q) => <>Impressions <span style={S.pill("#2980B9")}>{R[Q[0]]?.impressions} impr.</span></> },
+  ];
+  if (lam && lam.value !== "none") {
+    rows.push({ key: "lam", cls: "spec-row", get: (r) => r?.lamCost, label: () => <>Lamination <span style={S.pill("#8E44AD")}>{lam.label}</span></> });
+  }
+  if (job.folded) rows.push({ key: "fold", cls: "spec-row", get: (r) => r?.foldCost, label: () => <>Folding</> });
+  rows.push({ key: "trim", cls: "spec-row", get: (r) => r?.trimCost, label: () => <>Trimming</> });
+  if (bind) rows.push({ key: "bind", cls: "spec-row", get: (r) => r?.bindingCost, label: () => <>Binding <span style={S.pill("#27AE60")}>{bind.label}</span></> });
+  return rows;
+}
+
 // The money rows of the table, in display order
 function moneyRows(job, rates) {
+  if (isSheetWork(job)) return [...sheetRows(job), ...totalRows(job, rates)];
   const lam = LAM_TYPES.find(l => l.value === job.laminationType)?.label;
   const bind = BINDING_TYPES.find(b => b.value === job.bindingType)?.label;
   const rows = [
@@ -93,6 +115,14 @@ function moneyRows(job, rates) {
     { key: "trim", cls: "spec-row", get: (r) => r?.trimCost, label: () => <>Trimming</> },
     { key: "bind", cls: "spec-row", get: (r) => r?.bindingCost,
       label: () => <>Binding <span style={S.pill("#27AE60")}>{bind}</span></> },
+  );
+  return [...rows, ...totalRows(job, rates)];
+}
+
+// Subtotal → margin → VAT → grand total → unit price → deposit / balance
+function totalRows(job, rates) {
+  const rows = [];
+  rows.push(
     { key: "sub", cls: "subtotal-row spec-row", get: (r) => r?.subtotal, sub: true, label: () => <>Subtotal</> },
     { key: "margin", cls: "spec-row", get: (r) => r?.margin, label: () => <>Profit margin ({rates.profitMargin}%)</> },
     { key: "before", cls: "subtotal-row spec-row", get: (r) => r?.beforeVAT, sub: true, label: () => <>Total before VAT</> },

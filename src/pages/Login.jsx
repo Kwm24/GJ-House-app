@@ -99,7 +99,7 @@ export function Login() {
 
       <form
         onSubmit={handleSubmit}
-        className="bg-brand-cream rounded-xl p-6 sm:p-8 shadow-lg space-y-5"
+        className="bg-white/85 backdrop-blur-md backdrop-saturate-150 border border-white/50 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-5"
       >
         {error && (
           <div

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getSettings, updateSettings, uploadCompanyLogo, uploadQuoterThumbnail } from "../../lib/settings.js";
 import { DEFAULT_RATES, RATE_GROUPS } from "../../lib/printSpecs.js";
-import { LoginBackgroundSettings } from "./LoginBackgroundSettings.jsx";
 import { DigitalRatesEditor } from "../DigitalRatesEditor.jsx";
+import { LoginBackgroundSettings } from "./LoginBackgroundSettings.jsx";
 import { applyAccentHex } from "../AccentColorInjector.jsx";
 import { UNIT_JOB_TYPES, UNIT_JOB_LABELS, unitItems, unitThumbKey, mergeDigitalRates } from "../../lib/digitalPrintSpecs.js";
 
@@ -594,7 +594,8 @@ export function SettingsTab() {
         </div>
       </div>
 
-      {/* ── Login background ── */}
+
+      {/* ── Login background (halftone colours) ── */}
       <LoginBackgroundSettings />
 
       {/* ── Digital print rates (shared editor — also used by the Production rates account) ── */}

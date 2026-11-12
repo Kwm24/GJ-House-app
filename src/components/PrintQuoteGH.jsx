@@ -20,7 +20,7 @@ import { User, BookOpen, Settings2, Hash, DollarSign, Zap, Save, Printer, Chevro
 import { CustomerPicker } from "./CustomerPicker.jsx";
 import { saveQuoteToStorage } from "../lib/quoteStorage.js";
 import { getSettings } from "../lib/settings.js";
-import { fitOnSheet, resolveSheetDims } from "../lib/imposition.js";
+import { fitOnSheet, fitFlatOnSheet, resolveSheetDims } from "../lib/imposition.js";
 import { OffsetQuoteBreakdown } from "./quote/OffsetQuoteBreakdown.jsx";
 import ImpositionAdvisor from "./ImpositionAdvisor.jsx";
 import { DimensionInput, UnitSelect } from "./DimensionInput.jsx";
@@ -32,7 +32,8 @@ import {
   BINDING_TYPES,
   DEFAULT_RATES,
   RATE_GROUPS,
-  offsetBookLabel, offsetSheetLabel,
+  offsetSheetLabel,
+  SHEET_PRODUCTS, isSheetWork, offsetJobSummary,
 } from "../lib/printSpecs.js";
 
 // ─── PRINT STYLES (injected into <head>) ─────────────────────────────────────
@@ -157,8 +158,75 @@ function calcCoverPaper(pagesPerSide, qty, reamsSize = COVER_SHEETS_PER_REAM, sh
   return { coversPerSheet, totalSheets, reamsNeeded };
 }
 
+// ─── SHEETWORK (flyers, posters, calendars…) ─────────────────────────────────
+// Each copy is `leaves` flat leaves. Every leaf is its own design, imposed
+// n-up: sheets per leaf = print run ÷ copies per sheet.
+function calcFlatPaper(itemW, itemH, ps, printRun, leaves = 1, plate = null, sheetsPerBase = 1) {
+  if (!ps || !itemW || !itemH) return null;
+  const fitArea = plate || ps;
+  const fit = fitFlatOnSheet(itemW, itemH, fitArea.w, fitArea.h);
+  if (!fit) return null;
+  const platesPerSheetSide = plate ? Math.max(
+    1,
+    Math.floor(ps.w / fitArea.w) * Math.floor(ps.h / fitArea.h),
+    Math.floor(ps.w / fitArea.h) * Math.floor(ps.h / fitArea.w),
+  ) : 1;
+  const up            = fit.up * platesPerSheetSide;              // copies of one leaf per sheet
+  const sheetsPerLeaf = Math.ceil(printRun / up);
+  const totalSheets   = sheetsPerLeaf * leaves;
+  const reamsNeeded   = Math.ceil(totalSheets / (SHEETS_PER_REAM * Math.max(1, sheetsPerBase)));
+  return {
+    ...fit, flat: true, up, platesPerSheetSide, leaves, sheetsPerLeaf, totalSheets, reamsNeeded, sheetsPerBase,
+    // Same field names the book layout uses, so shared displays keep working
+    pagesPerSide: fit.up, pagesPerSheet: up, pagesPerSheetEffective: up, sheetsPerCopy: leaves / up,
+  };
+}
+
+function sheetPlates(job) {
+  const leaves = Math.max(1, parseInt(job.leaves) || 1);
+  const sides  = job.printSides === "double" ? 2 : 1;
+  return leaves * sides * Number(job.colours);
+}
+
+function calcSheetQuote(job, rates, qty) {
+  const orderedQty = qty;
+  const overs      = Math.max(0, parseInt(job.overs) || 0);
+  const printRun   = orderedQty + overs;
+  const leaves     = Math.max(1, parseInt(job.leaves) || 1);
+  const sheetsPerBase = job.parentSheet === "custom" ? Math.max(1, job.customSheetsPerBase || 1) : 1;
+
+  const paper = calcFlatPaper(job.bookW, job.bookH, resolveSheet(job), printRun, leaves, resolvePlate(job), sheetsPerBase);
+  if (!paper) return null;
+
+  const numPlates = job.useManualPlates ? Math.max(1, parseInt(job.seposPlates) || 0) : sheetPlates(job);
+  const plateCost      = numPlates * rates.plateRate;
+  const paperCost      = paper.reamsNeeded * rates.paperRate;
+  const impressions    = numPlates;
+  const impressionCost = impressions * rates.impressionRate;
+  const lamCost        = job.laminationType && job.laminationType !== "none" ? printRun * leaves * getLamRate(job.laminationType, rates) : 0;
+  const foldCost       = job.folded ? printRun * rates.foldCollateRate : 0;
+  const trimCost       = printRun * (rates.trimRate || 0);
+  const bindingCost    = job.sheetBinding && job.sheetBinding !== "none" ? printRun * getBindingRate(job.sheetBinding, rates) : 0;
+
+  const subtotal   = plateCost + paperCost + impressionCost + lamCost + foldCost + trimCost + bindingCost;
+  const margin     = subtotal * (rates.profitMargin / 100);
+  const beforeVAT  = subtotal + margin;
+  const vatAmt     = job.applyVAT ? beforeVAT * VAT_RATE : 0;
+  const grandTotal = beforeVAT + vatAmt;
+
+  return {
+    sheetWork: true,
+    numPlates, plateCost, paper, paperCost, impressions, impressionCost,
+    lamCost, trimCost, foldCost, bindingCost,
+    coverPlateCost: 0, coverPaperCost: 0, coverLamCost: 0, coverPaper: null, coverImpressionCost: 0,
+    subtotal, margin, beforeVAT, vatAmt, grandTotal, unitPrice: grandTotal / orderedQty,
+    overs, printRun, orderedQty,
+  };
+}
+
 // ─── QUOTE CALCULATOR ─────────────────────────────────────────────────────────
 function calcQuote(job, rates, qty) {
+  if (isSheetWork(job)) return calcSheetQuote(job, rates, qty);
   const {
     numPages, colours, bookW, bookH,
     hasCover, coverColours, coverSides, laminationType,
@@ -277,6 +345,8 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
 
   const [job, setJob] = useState({
     clientName: "", clientPhone: "", clientEmail: "", jobTitle: "", invoiceNo: "", date: new Date().toISOString().slice(0, 10),
+    workType: "book",            // "book" | "sheet" (flyers, posters, calendars…)
+    sheetProduct: "flyer", printSides: "double", leaves: 1, folded: false, sheetBinding: "none",
     numPages: 136, colours: "1",
     bookSize: "A5", bookW: BOOK_SIZES.A5.w, bookH: BOOK_SIZES.A5.h,
     dimUnit: "in",   // unit sizes are shown/typed in; sizes are still stored + priced in inches
@@ -366,19 +436,38 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
     return out;
   }, [job, rates, allQtys]);
 
+  const sheetMode = isSheetWork(job);
   const paperPreview = useMemo(() => {
     const spb = job.parentSheet === "custom" ? Math.max(1, job.customSheetsPerBase || 1) : 1;
+    if (isSheetWork(job)) {
+      return calcFlatPaper(job.bookW, job.bookH, resolveSheet(job), (allQtys[0] || 1000) + (parseInt(job.overs) || 0),
+        Math.max(1, parseInt(job.leaves) || 1), resolvePlate(job), spb);
+    }
     return calcPaper(job.bookW, job.bookH, resolveSheet(job), job.numPages, allQtys[0] || 1000, job.printOrientation, resolvePlate(job), spb);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job.bookW, job.bookH, job.parentSheet, job.customSheetW, job.customSheetH,
      job.parentSheetOrientation, job.printOrientation, job.numPages,
      job.plateSize, job.customPlateW, job.customPlateH,
-     job.customSheetsPerBase, allQtys]);
+     job.customSheetsPerBase, allQtys, job.workType, job.leaves, job.overs]);
 
   const autoPlates = useMemo(() => {
     if (!paperPreview) return null;
+    if (isSheetWork(job)) return sheetPlates(job);
     return Math.ceil(job.numPages / paperPreview.pagesPerSide) * Number(job.colours);
-  }, [paperPreview, job.numPages, job.colours]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paperPreview, job.numPages, job.colours, job.workType, job.leaves, job.printSides]);
+
+  // Switching to a sheet product fills in its usual size, sides, leaves, folding, binding
+  function pickSheetProduct(value) {
+    const p = SHEET_PRODUCTS.find((x) => x.value === value) || SHEET_PRODUCTS[0];
+    const sz = BOOK_SIZES[p.size];
+    setJob(j => ({
+      ...j, workType: "sheet", sheetProduct: p.value, printSides: p.sides, leaves: p.leaves,
+      folded: p.folded, sheetBinding: p.binding, hasCover: false,
+      bookSize: p.size, bookW: sz.w, bookH: sz.h,
+      colours: j.workType === "sheet" ? j.colours : "4",
+    }));
+  }
 
   const resultQtys = allQtys.filter(q => results[q]);
 
@@ -496,7 +585,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
               </div>
               <div className="grid grid-cols-2 gap-3 mt-3">
                 <div>
-                  <label className={LBL}>Job title / book name</label>
+                  <label className={LBL}>{sheetMode ? "Job title" : "Job title / book name"}</label>
                   <input className={INP} value={job.jobTitle} onChange={e => setJ("jobTitle", e.target.value)} placeholder="e.g. Elite Mathematics JHS" />
                 </div>
                 <div>
@@ -515,11 +604,48 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
             {/* 02 Print Specifications */}
             <div className={CARD}>
               <SectionHeader icon={BookOpen} label="02 — Print Specifications" />
+
+              {/* Type of work */}
+              <div className="mb-4">
+                <label className={LBL}>Type of work</label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={chip(!sheetMode)} onClick={() => setJob(j => ({ ...j, workType: "book" }))}>
+                    Books &amp; booklets
+                  </button>
+                  <button type="button" className={chip(sheetMode)} onClick={() => pickSheetProduct(job.sheetProduct || "flyer")}>
+                    Single sheets: flyers, brochures, posters, calendars…
+                  </button>
+                </div>
+              </div>
+
+              {sheetMode && (
+                <div className="mb-4">
+                  <label className={LBL}>Product</label>
+                  <div className="flex flex-wrap gap-2">
+                    {SHEET_PRODUCTS.map(p => (
+                      <button key={p.value} type="button" className={chip(job.sheetProduct === p.value)} onClick={() => pickSheetProduct(p.value)}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
+                {sheetMode ? (
+                <div>
+                  <label className={LBL}>Printed sides</label>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className={chip(job.printSides !== "double")} onClick={() => setJ("printSides", "single")}>Single-sided</button>
+                    <button type="button" className={chip(job.printSides === "double")} onClick={() => setJ("printSides", "double")}>Double-sided</button>
+                  </div>
+                </div>
+                ) : (
                 <div>
                   <label className={LBL}>Number of pages</label>
                   <input className={INP} type="number" min={4} step={4} value={job.numPages} onChange={e => setJ("numPages", Number(e.target.value))} />
                 </div>
+                )}
                 <div>
                   <label className={LBL}>Colours</label>
                   <select className={INP} value={job.colours} onChange={e => setJ("colours", e.target.value)}>
@@ -532,7 +658,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
               <div className="grid grid-cols-2 gap-3 mt-3">
                 <div>
                   <div className="flex items-end justify-between gap-2">
-                    <label className={LBL}>Book / print size</label>
+                    <label className={LBL}>{sheetMode ? "Finished size (flat)" : "Book / print size"}</label>
                     <UnitSelect value={dimUnit} onChange={(u) => setJ("dimUnit", u)} ariaLabel="Size unit"
                       className="mb-1 rounded-md border border-[var(--t-border)] bg-[var(--t-surface)] px-2 py-1 text-xs text-[var(--t-text1)]" />
                   </div>
@@ -560,8 +686,13 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                   <div className={INFO_BOX + " flex items-start gap-2 self-end"}>
                     <Info size={13} className="shrink-0 mt-0.5" />
                     <span>
+                      {paperPreview.flat ? <>
+                        <b>Layout:</b> {paperPreview.across}x{paperPreview.down} = {paperPreview.up} per sheet{paperPreview.rotated ? " (rotated)" : ""}
+                        {" · "}{paperPreview.totalSheets.toLocaleString()} sheets &middot; {paperPreview.reamsNeeded} reams per {(allQtys[0] || 1000).toLocaleString()} copies
+                      </> : <>
                       <b>Layout:</b> {paperPreview.pairsAcross}x{paperPreview.rowsDown} = {paperPreview.pagesPerSide} pages/side{paperPreview.rotated ? " (rotated)" : ""}
                       {" · "}{paperPreview.sheetsPerCopy} sheets/copy &middot; {paperPreview.reamsNeeded} reams per {(allQtys[0] || 1000).toLocaleString()} copies
+                      </>}
                     </span>
                   </div>
                 ) : null}
@@ -569,11 +700,33 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
               {job.bookSize === "Custom" && paperPreview && (
                 <div className={INFO_BOX + " flex items-start gap-2 mt-3"}>
                   <Info size={13} className="shrink-0 mt-0.5" />
+                  {paperPreview.flat ? (
+                    <span>Layout: {paperPreview.across}x{paperPreview.down} = {paperPreview.up} per sheet{paperPreview.rotated ? " (rotated)" : ""}
+                      {" · "}{paperPreview.totalSheets.toLocaleString()} sheets &middot; {paperPreview.reamsNeeded} reams
+                    </span>
+                  ) : (
                   <span>Layout: {paperPreview.pairsAcross}x{paperPreview.rowsDown} = {paperPreview.pagesPerSide} pages/side
                     {paperPreview.rotated ? " (rotated)" : ""}{" · "}{paperPreview.sheetsPerCopy} sheets/copy &middot; {paperPreview.reamsNeeded} reams
                   </span>
+                  )}
                 </div>
               )}
+              {sheetMode && (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={LBL}>Leaves per copy</label>
+                    <input className={INP} type="number" min={1} value={job.leaves}
+                      onChange={e => setJ("leaves", Math.max(1, parseInt(e.target.value) || 1))} />
+                    <p className={HINT}>Different designs in one copy, e.g. 13 for a wall calendar (12 months + cover). Flyers and posters: 1.</p>
+                  </div>
+                </div>
+              )}
+              {sheetMode ? (
+                <div className="mt-4 border-t border-[var(--t-border)] pt-4">
+                  <SheetworkSheetPicker job={job} rates={rates} qty={(allQtys[0] || 1000) + (parseInt(job.overs) || 0)} unit={dimUnit}
+                    onSelect={(key) => setJ("parentSheet", key)} />
+                </div>
+              ) : (
               <div className="mt-4 border-t border-[var(--t-border)] pt-4">
                 <ImpositionAdvisor
                   bookW={job.bookW} bookH={job.bookH} numPages={job.numPages} colours={job.colours}
@@ -603,6 +756,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                   }}
                 />
               </div>
+              )}
             </div>
 
             {/* 03 Production Setup */}
@@ -635,10 +789,10 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                   <div className={INFO_BOX + " flex items-start gap-2 mt-2"}>
                     <Info size={13} className="shrink-0 mt-0.5" />
                     <span>
-                      {paperPreview.pagesPerSide} pages/plate side &middot; {paperPreview.platesPerSheetSide} plate{paperPreview.platesPerSheetSide !== 1 ? "s" : ""}/sheet side
+                      {paperPreview.pagesPerSide} {sheetMode ? "copies" : "pages"}/plate side &middot; {paperPreview.platesPerSheetSide} plate{paperPreview.platesPerSheetSide !== 1 ? "s" : ""}/sheet side
                       {paperPreview.platesPerSheetSide > 1
-                        ? ` → ${paperPreview.pagesPerSheetEffective} pages/sheet (${paperPreview.platesPerSheetSide}-up)`
-                        : ` → ${paperPreview.pagesPerSheetEffective} pages/sheet`}
+                        ? ` → ${paperPreview.pagesPerSheetEffective} ${sheetMode ? "copies" : "pages"}/sheet (${paperPreview.platesPerSheetSide}-up)`
+                        : ` → ${paperPreview.pagesPerSheetEffective} ${sheetMode ? "copies" : "pages"}/sheet`}
                     </span>
                   </div>
                 )}
@@ -655,7 +809,11 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
               ) : (
                 <p className={HINT + " mt-2"}>
                   Auto-calculated: <b className="text-[var(--t-text1)] not-italic">{autoPlates ?? "—"} plates</b>
-                  {autoPlates && paperPreview && (() => {
+                  {autoPlates && paperPreview && sheetMode && (() => {
+                    const leaves = Math.max(1, parseInt(job.leaves) || 1);
+                    return ` (${leaves > 1 ? `${leaves} leaves × ` : ""}${job.printSides === "double" ? 2 : 1} side${job.printSides === "double" ? "s" : ""} × ${job.colours} colour${Number(job.colours) > 1 ? "s" : ""})`;
+                  })()}
+                  {autoPlates && paperPreview && !sheetMode && (() => {
                     const sides = Math.ceil(job.numPages / paperPreview.pagesPerSide);
                     return ` (${sides} sides × ${job.colours} colour${Number(job.colours) > 1 ? "s" : ""})`;
                   })()}
@@ -665,17 +823,44 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={LBL}>Binding type</label>
+                  {sheetMode ? (
+                    <select className={INP} value={job.sheetBinding || "none"} onChange={e => setJ("sheetBinding", e.target.value)}>
+                      <option value="none">None</option>
+                      {BINDING_TYPES.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+                    </select>
+                  ) : (
                   <select className={INP} value={job.bindingType} onChange={e => setJ("bindingType", e.target.value)}>
                     {BINDING_TYPES.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
                   </select>
+                  )}
                 </div>
                 <div className={INFO_BOX + " flex flex-col justify-center"}>
-                  <span className="font-medium">{BINDING_TYPES.find(b => b.value === job.bindingType)?.label}</span>
-                  <span className="text-sm font-bold mt-0.5">GH&#8373; {getBindingRate(job.bindingType, rates).toFixed(2)}<span className="text-xs font-normal ml-1">/ copy</span></span>
+                  <span className="font-medium">{(sheetMode && (job.sheetBinding || "none") === "none") ? "No binding" : BINDING_TYPES.find(b => b.value === (sheetMode ? job.sheetBinding : job.bindingType))?.label}</span>
+                  <span className="text-sm font-bold mt-0.5">GH&#8373; {(sheetMode ? ((job.sheetBinding || "none") === "none" ? 0 : getBindingRate(job.sheetBinding, rates)) : getBindingRate(job.bindingType, rates)).toFixed(2)}<span className="text-xs font-normal ml-1">/ copy</span></span>
                   {!csMode && <p className={HINT + " text-indigo-500 dark:text-indigo-400 not-italic mt-1"}>Edit rate in Rate Settings below</p>}
                 </div>
               </div>
               <hr className="border-[var(--t-border)] my-4" />
+              {sheetMode ? (
+                <div className="space-y-4">
+                  <Toggle on={!!job.folded} onToggle={() => setJ("folded", !job.folded)} label="Folded"
+                    sublabel={`— folding at GH₵ ${Number(rates.foldCollateRate || 0).toFixed(2)} per copy`} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={LBL}>Lamination</label>
+                      <select className={INP} value={job.laminationType} onChange={e => setJ("laminationType", e.target.value)}>
+                        {LAM_TYPES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                      </select>
+                    </div>
+                    {job.laminationType !== "none" && (
+                      <div className={INFO_BOX + " flex flex-col justify-center"}>
+                        <span className="text-sm font-bold">GH&#8373; {getLamRate(job.laminationType, rates).toFixed(2)}<span className="text-xs font-normal ml-1">/ leaf</span></span>
+                        <span className="mt-0.5">× {Math.max(1, parseInt(job.leaves) || 1)} lea{Math.max(1, parseInt(job.leaves) || 1) > 1 ? "ves" : "f"} per copy</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (<>
               <Toggle on={job.hasCover} onToggle={() => setJ("hasCover", !job.hasCover)} label="Job has a separate cover" />
               {job.hasCover && (
                 <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -710,6 +895,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                   )}
                 </div>
               )}
+              </>)}
             </div>
 
             {/* 04 Quantities */}
@@ -833,10 +1019,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                 <div style={{ fontSize: 15, fontWeight: 700, color: "#1C1C1E" }}>{job.jobTitle || "—"}</div>
                 <div style={{ fontSize: 11, color: "#666", marginTop: 3 }}>
                   {job.clientName && <span>Client: <b>{job.clientName}</b> &middot; </span>}
-                  {job.numPages} pages &middot; {job.colours === "1" ? "1 colour" : job.colours === "4" ? "Full colour" : "2 colours"} &middot;{" "}
-                  {offsetBookLabel(job, dimUnit)} &middot; {offsetSheetLabel(resolveSheet(job), dimUnit)} &middot;{" "}
-                  {BINDING_TYPES.find(b => b.value === job.bindingType)?.label}
-                  {job.hasCover && ` · Cover: ${LAM_TYPES.find(l => l.value === job.laminationType)?.label || "No lam."}`}
+                  {offsetJobSummary(job, dimUnit, offsetSheetLabel(resolveSheet(job), dimUnit))}
                 </div>
               </div>
 
@@ -846,11 +1029,7 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
                     <td colSpan={resultQtys.length + 1} style={{ textAlign: "left", fontFamily: "inherit", fontSize: 11, color: "#666", paddingBottom: 14, borderBottom: "1px solid #E0D9CF" }}>
                       <div style={{ fontWeight: 700, fontSize: 14, color: "#1C1C1E", marginBottom: 4 }}>{job.jobTitle || "Printing Services"}</div>
                       <div style={{ fontSize: 11, color: "#555", lineHeight: "1.7" }}>
-                        {job.numPages}-page &middot; {job.colours === "1" ? "1 colour" : job.colours === "4" ? "Full colour" : `${job.colours} colours`} &middot;{" "}
-                        {offsetBookLabel(job, dimUnit)} &middot; {offsetSheetLabel(resolveSheet(job), dimUnit)} &middot;{" "}
-                        {BINDING_TYPES.find(b => b.value === job.bindingType)?.label}
-                        {job.hasCover && " · With separate cover"}
-                        {job.hasCover && job.laminationType !== "none" && ` (${LAM_TYPES.find(l => l.value === job.laminationType)?.label} lamination)`}
+                        {offsetJobSummary(job, dimUnit, offsetSheetLabel(resolveSheet(job), dimUnit))}
                       </div>
                     </td>
                   </tr>
@@ -886,6 +1065,46 @@ export default function PrintQuoteGH({ embedded = false, csMode = false, initial
 
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── SHEETWORK: compare parent sheets ─────────────────────────────────────────
+// For flat work the best sheet is simply the one with the lowest paper cost
+// for this run (plates and impressions don't depend on the sheet size).
+function SheetworkSheetPicker({ job, rates, qty, unit, onSelect }) {
+  const leaves = Math.max(1, parseInt(job.leaves) || 1);
+  const plate  = resolvePlate(job);
+  const rows = Object.entries(PARENT_SHEETS).map(([key, sheet]) => {
+    const ps = resolveSheetDims(sheet, job.parentSheetOrientation);
+    const p  = calcFlatPaper(job.bookW, job.bookH, ps, qty, leaves, plate, 1);
+    return { key, sheet, p, cost: p ? p.reamsNeeded * (rates.paperRate || 0) : Infinity };
+  });
+  const best = rows.filter(r => r.p).reduce((a, b) => (b.cost < a.cost || (b.cost === a.cost && b.p.up > a.p.up) ? b : a), { cost: Infinity });
+  return (
+    <div>
+      <p className={LBL}>Parent sheet <span className="font-normal text-[var(--t-muted)]">for {qty.toLocaleString()} copies (incl. overs)</span></p>
+      <div className="overflow-hidden rounded-lg border border-[var(--t-border)] divide-y divide-[var(--t-border)]">
+        {rows.map(({ key, sheet, p, cost }) => {
+          const on = job.parentSheet === key;
+          return (
+            <button key={key} type="button" disabled={!p} onClick={() => onSelect(key)} aria-pressed={on}
+              className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-xs transition-colors disabled:opacity-50 ${on ? "bg-[#6366F1]/10" : "hover:bg-[var(--t-bg)]"}`}>
+              <span className="min-w-0">
+                <span className="font-semibold text-[var(--t-text1)]">{offsetSheetLabel(sheet, unit)}</span>
+                {best.key === key && <span className="ml-2 text-[10px] font-semibold text-green-600">★ cheapest paper</span>}
+                <span className="block text-[var(--t-muted)]">
+                  {p ? `${p.across}×${p.down} = ${p.up} per sheet${p.rotated ? " (rotated)" : ""} · ${p.totalSheets.toLocaleString()} sheets · ${p.reamsNeeded} reams` : "Doesn't fit"}
+                </span>
+              </span>
+              {p && <span className="shrink-0 font-semibold tabular-nums text-[var(--t-text1)]">GH&#8373; {cost.toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+            </button>
+          );
+        })}
+      </div>
+      {job.parentSheet === "custom" && (
+        <p className={HINT}>A custom sheet is selected. Pick one above to switch.</p>
+      )}
     </div>
   );
 }

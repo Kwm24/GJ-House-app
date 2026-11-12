@@ -19,7 +19,7 @@ import { loadSavedQuotes, loadDigitalQuotes } from "../../lib/quoteStorage.js";
 import { buildDigitalSpecSummary } from "../DigitalPrintQuoteGH.jsx";
 import { snapshotForLine } from "../../lib/quoteLines.js";
 import { digitalJobSizeLabel } from "../../lib/digitalPrintSpecs.js";
-import { offsetBookLabel } from "../../lib/printSpecs.js";
+import { offsetBookLabel, isSheetWork, offsetJobSummary } from "../../lib/printSpecs.js";
 // Note: createJobFromInvoice is now called by Accounts (PaymentsTab) when they
 // record payment — CS no longer marks invoices as paid directly.
 import { formatGHS as GHS } from "../../lib/currency.js";
@@ -233,6 +233,7 @@ function digitalSizeLabel(j) {
 
 function buildSpecSummary(snap) {
   const j = snap.job || {};
+  if (isSheetWork(j)) return offsetJobSummary(j, j.dimUnit || "in");
   const sz = offsetSizeLabel(j);
   const pages = j.numPages ? `${j.numPages}pp` : "";
   const body  = j.colours === "4" ? "FC body" : `${j.colours || "1"}C body`;

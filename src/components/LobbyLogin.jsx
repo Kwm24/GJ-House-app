@@ -69,9 +69,6 @@ export function LobbyLogin({ icon, title, subtitle, requiredRole, lobbyPath, sig
 
       <LoginBackdrop />
 
-      {/* Subtle dot grid */}
-      <div className="pointer-events-none absolute inset-0 opacity-[0.04]" aria-hidden="true"
-        style={{ backgroundImage: "radial-gradient(circle, #fff 1px, transparent 1px)", backgroundSize: "28px 28px" }} />
 
       {/* Brand mark */}
       <div className="relative w-full max-w-md text-center mb-8">
@@ -92,7 +89,7 @@ export function LobbyLogin({ icon, title, subtitle, requiredRole, lobbyPath, sig
       {/* Form card */}
       <form
         onSubmit={handleSubmit}
-        className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl p-6 sm:p-8 space-y-5"
+        className="relative w-full max-w-md rounded-2xl bg-white/85 backdrop-blur-md backdrop-saturate-150 border border-white/50 shadow-2xl p-6 sm:p-8 space-y-5"
         style={{ boxShadow: "0 24px 64px rgba(0,0,0,0.4)" }}
       >
         <div>

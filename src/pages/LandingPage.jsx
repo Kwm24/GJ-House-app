@@ -2,12 +2,13 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
   Printer, Layers, Tag, Gift, Zap, Shield, DollarSign, MapPin,
-  Menu, X, Phone, Mail, BookOpen, ShoppingBag, MessageCircle,
+  Menu, X, Phone, Mail, BookOpen, ShoppingBag,
 } from "lucide-react";
 import { getSettings } from "../lib/settings.js";
 import { InstantQuoter, buildInstantQuoteSummary } from "../components/InstantQuoter.jsx";
 import { RatesView } from "../components/RatesView.jsx";
 import { SonarGrid } from "../components/ui/sonar-grid.jsx";
+import { WhatsAppIcon } from "../components/ui/whatsapp-icon.jsx";
 
 // ── Icon sets ─────────────────────────────────────────────────────────────────
 const SERVICE_ICONS = {
@@ -616,7 +617,11 @@ function CTABanner({ cta, styles }) {
 }
 
 // ── Footer ────────────────────────────────────────────────────────────────────
-function Footer({ appName, logoUrl, contact, styles, accent }) {
+function Footer({ appName, logoUrl, contact, styles, whatsappNumber = "" }) {
+  // tel: keeps a leading + and digits only ("+233 24 123 4567" → tel:+233241234567)
+  const tel = String(contact.phone || "").trim().replace(/(?!^\+)[^\d]/g, "");
+  const wa  = String(whatsappNumber || "").replace(/\D/g, "");
+  const linkCls = "flex items-center gap-2 text-sm rounded-sm hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--lp-accent)]";
   return (
     <SectionWrapper sectionKey="footer" styles={styles} id="contact">
       <div className="border-t border-[#E8E8EC] px-6 py-12">
@@ -653,19 +658,25 @@ function Footer({ appName, logoUrl, contact, styles, accent }) {
           <div className="flex flex-col gap-2">
             <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#9C9C9C" }}>Contact</p>
             {contact.address && (
-              <div className="flex items-center gap-2 text-sm" style={{ color: "var(--lp-text2)" }}>
-                <MapPin size={13} className="shrink-0" style={{ color: "#9C9C9C" }} /> {contact.address}
-              </div>
+              <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contact.address)}`}
+                target="_blank" rel="noopener noreferrer" className={linkCls} style={{ color: "var(--lp-text2)" }}>
+                <MapPin size={13} className="shrink-0" style={{ color: "#9C9C9C" }} aria-hidden="true" /> {contact.address}
+              </a>
             )}
             {contact.phone && (
-              <div className="flex items-center gap-2 text-sm" style={{ color: "var(--lp-text2)" }}>
-                <Phone size={13} className="shrink-0" style={{ color: "#9C9C9C" }} /> {contact.phone}
-              </div>
+              <a href={`tel:${tel}`} className={linkCls} style={{ color: "var(--lp-text2)" }}>
+                <Phone size={13} className="shrink-0" style={{ color: "#9C9C9C" }} aria-hidden="true" /> {contact.phone}
+              </a>
+            )}
+            {wa && (
+              <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" className={linkCls} style={{ color: "var(--lp-text2)" }}>
+                <WhatsAppIcon size={13} className="shrink-0" style={{ color: "#25D366" }} /> Chat on WhatsApp
+              </a>
             )}
             {contact.email && (
-              <div className="flex items-center gap-2 text-sm" style={{ color: "var(--lp-text2)" }}>
-                <Mail size={13} className="shrink-0" style={{ color: "#9C9C9C" }} /> {contact.email}
-              </div>
+              <a href={`mailto:${contact.email.trim()}`} className={linkCls} style={{ color: "var(--lp-text2)" }}>
+                <Mail size={13} className="shrink-0" style={{ color: "#9C9C9C" }} aria-hidden="true" /> {contact.email}
+              </a>
             )}
           </div>
         </div>
@@ -691,7 +702,7 @@ function WhatsAppFloat({ number }) {
       aria-label="Chat on WhatsApp"
       className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-[#25D366] flex items-center justify-center shadow-[0_4px_16px_rgba(37,211,102,0.45)] hover:scale-110 hover:shadow-[0_6px_20px_rgba(37,211,102,0.6)] active:scale-100 transition-all duration-200"
     >
-      <MessageCircle size={26} className="text-white" fill="white" />
+      <WhatsAppIcon size={30} className="text-white" />
     </a>
   );
 }
@@ -762,7 +773,7 @@ export function LandingPage() {
       <CTABanner  cta={content.cta}           styles={content.section_styles} />
       <RatesModal open={ratesModalOpen} onClose={closeRates} onGetQuote={() => setQuoteModalOpen(true)} />
       <QuoteModal open={quoteModalOpen} onClose={() => setQuoteModalOpen(false)} accent={accent} whatsappNumber={whatsappNumber} />
-      <Footer     appName={appName} logoUrl={logoUrl} contact={content.contact} styles={content.section_styles} accent={accent} />
+      <Footer     appName={appName} logoUrl={logoUrl} contact={content.contact} styles={content.section_styles} whatsappNumber={whatsappNumber} />
       <WhatsAppFloat number={whatsappNumber} />
     </div>
   );

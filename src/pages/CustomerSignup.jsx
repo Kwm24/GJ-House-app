@@ -64,7 +64,7 @@ export function CustomerSignup() {
   if (success) {
     return (
       <div className="w-full">
-        <div className="rounded-xl bg-brand-cream p-6 sm:p-8 shadow-lg text-center">
+        <div className="rounded-2xl bg-white/85 backdrop-blur-md backdrop-saturate-150 border border-white/50 p-6 sm:p-8 shadow-2xl text-center">
           <div className="text-4xl mb-3">🎉</div>
           <h2 className="text-lg font-bold text-brand-dark">Account created!</h2>
           <p className="mt-2 text-sm text-gray-600">
@@ -102,7 +102,7 @@ export function CustomerSignup() {
 
       <form
         onSubmit={handleSubmit}
-        className="bg-brand-cream rounded-xl p-6 sm:p-8 shadow-lg space-y-4"
+        className="bg-white/85 backdrop-blur-md backdrop-saturate-150 border border-white/50 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-4"
       >
         {error && (
           <div role="alert" className="rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-3">

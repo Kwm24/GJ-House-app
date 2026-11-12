@@ -8,10 +8,11 @@
  */
 import { useEffect, useState } from "react";
 import {
-  ArrowLeft, Check, Loader2, MapPin, MessageCircle, Phone, Mail, ShieldCheck,
+  ArrowLeft, Check, Loader2, MapPin, Phone, Mail, ShieldCheck,
   KeyRound, LogOut, UserRound, Building2,
 } from "lucide-react";
 import { useAuth } from "../AuthProvider.jsx";
+import { WhatsAppIcon } from "../ui/whatsapp-icon.jsx";
 import {
   getMyProfile, updateMyProfile, signInMethods, changeSignInEmail, setPassword, signOutEverywhere,
 } from "../../lib/customerProfile.js";
@@ -52,7 +53,7 @@ function Notice({ msg }) {
 }
 
 const PREFS = [
-  { value: "whatsapp", label: "WhatsApp", Icon: MessageCircle },
+  { value: "whatsapp", label: "WhatsApp", Icon: WhatsAppIcon },
   { value: "phone",    label: "Phone call", Icon: Phone },
   { value: "email",    label: "Email", Icon: Mail },
 ];
@@ -376,7 +377,7 @@ export function ProfilePrompts({ onOpenProfile, accent = "#C0392B" }) {
   if (!missingContact && !missingLocation) return null;
   return (
     <div className="mb-4 space-y-2">
-      {missingContact && banner(MessageCircle,
+      {missingContact && banner(WhatsAppIcon,
         <><b className="text-[var(--t-text1)]">Add your WhatsApp number</b> so we can send your designs and order updates to you.</>,
         "Add number", "contact")}
       {missingLocation && banner(MapPin,

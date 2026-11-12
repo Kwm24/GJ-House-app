@@ -1,7 +1,8 @@
 import { buildWhatsAppChatUrl } from "../../lib/jobNotify.js";
 import { openCustomerWhatsApp } from "../../lib/customerProfile.js";
 import { formatGHS } from "../../lib/currency.js";
-import { ChevronRight, MessageCircle } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { WhatsAppIcon } from "../ui/whatsapp-icon.jsx";
 
 // Status accent colours — left border + badge
 const STATUS_STYLE = {
@@ -85,7 +86,7 @@ export function JobCard({ job, designCost, onClick, assignmentSlot }) {
             onClick={(e) => { e.stopPropagation(); e.preventDefault(); openCustomerWhatsApp(job); }}
             className="flex items-center justify-center gap-1.5 rounded-lg bg-[#25D366] text-white text-xs font-medium py-1.5 hover:bg-[#1ebe5a] transition-colors"
           >
-            <MessageCircle size={12} />
+            <WhatsAppIcon size={13} />
             WhatsApp client
           </a>
         </div>
